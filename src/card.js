@@ -6,6 +6,7 @@ import {renderTimeline} from "./timeline.js";
 import {formatDate, startOfDay, toDateKey, toLatLon} from "./utils.js";
 import {TimelineLeafletMap} from "./leaflet-map.js";
 import {clearReverseGeocodingQueue, resolveStaySegments} from "./reverse-geocoding.js";
+import {getConfigFormSchema} from "./config-flow.js";
 
 const DEFAULT_CONFIG = {
     entity: null,
@@ -13,6 +14,8 @@ const DEFAULT_CONFIG = {
     osm_api_key: null,
     stay_radius_m: 75,
     min_stay_minutes: 10,
+    map_appearance: "auto",
+    map_height_px: 200,
 };
 
 class TimelineCard extends HTMLElement {
@@ -87,8 +90,14 @@ class TimelineCard extends HTMLElement {
         } else if (config.distance_unit !== "metric" && config.distance_unit !== "imperial") {
             throw new Error("distance_unit must be either 'metric' or 'imperial'");
         }
+        this._config.map_appearance = this._config.map_appearance ?? "auto";
+        if (!["auto", "light", "dark"].includes(this._config.map_appearance)) {
+            throw new Error("map_appearance must be one of 'auto', 'light', or 'dark'");
+        }
         this._cache.clear();
         this._selectedDate = startOfDay(new Date());
+        this._syncMapAppearance();
+        this._applyMapHeight();
         if (this._hass) {
             this._ensureDay(this._selectedDate);
         }
@@ -97,7 +106,7 @@ class TimelineCard extends HTMLElement {
 
     set hass(hass) {
         this._hass = hass;
-        this._mapView?.setDarkMode(Boolean(this._hass?.themes?.darkMode));
+        this._syncMapAppearance();
         if (!this._config.entity) return;
         const dateKey = toDateKey(this._selectedDate);
         if (!this._cache.has(dateKey)) {
@@ -110,25 +119,7 @@ class TimelineCard extends HTMLElement {
     }
 
     static getConfigForm() {
-        return {
-            schema: [
-                {name: "entity", required: true, selector: {entity: {}}},
-                {name: "places_entity", selector: {entity: {filter: [{domain: "sensor"}]}}},
-                {name: "osm_api_key", selector: {text: {type: "email"}}},
-                {name: "stay_radius_m", selector: {number: {min: 1, step: 1, mode: "box"}}},
-                {name: "min_stay_minutes", selector: {number: {min: 1, step: 1, mode: "box"}}},
-                {name: "distance_unit", selector: {select: {options: [{value: "metric", label: "Metric (m, km)"}, {value: "imperial", label: "Imperial (ft, mi)"}]}}},
-            ],
-            computeLabel: (schema) => {
-                if (schema.name === "entity") return "Tracked entity";
-                if (schema.name === "places_entity") return "Places entity (optional)";
-                if (schema.name === "osm_api_key") return "OSM API key (email, optional)";
-                if (schema.name === "stay_radius_m") return "Stay radius (m)";
-                if (schema.name === "min_stay_minutes") return "Minimum stay (minutes)";
-                if (schema.name === "distance_unit") return "Distance unit";
-                return undefined;
-            },
-        };
+        return getConfigFormSchema();
     }
 
     static getStubConfig() {
@@ -139,7 +130,25 @@ class TimelineCard extends HTMLElement {
             stay_radius_m: 75,
             min_stay_minutes: 10,
             distance_unit: "metric",
+            map_appearance: "auto",
+            map_height_px: 200,
         };
+    }
+
+    _syncMapAppearance() {
+        let darkMode = Boolean(this._hass?.themes?.darkMode);
+        if (this._config.map_appearance === "dark") {
+            darkMode = true;
+        } else if (this._config.map_appearance === "light") {
+            darkMode = false;
+        }
+        this._mapView?.setDarkMode(darkMode);
+    }
+
+    _applyMapHeight() {
+        const mapElement = this.shadowRoot?.getElementById("overview-map");
+        if (!mapElement) return;
+        mapElement.style.setProperty("height", `${this._config.map_height_px}px`, "important");
     }
 
     getCardSize() {
@@ -245,6 +254,8 @@ class TimelineCard extends HTMLElement {
         const nextButton = this.shadowRoot.querySelector("[data-action='next']");
         nextButton.toggleAttribute("disabled", isFuture);
 
+        this._applyMapHeight();
+
         const body = this.shadowRoot.getElementById("timeline-body");
         this._bindTimelineTouch(body);
         this._updateMapResetButton();
@@ -346,7 +357,7 @@ class TimelineCard extends HTMLElement {
         this._isLoadingMap = true;
         try {
             this._mapView = new TimelineLeafletMap(container);
-            this._mapView.setDarkMode(Boolean(this._hass?.themes?.darkMode));
+            this._syncMapAppearance();
             this._refreshMapPaths();
             this._mapView.fitMap({defer: true});
         } catch (err) {
@@ -482,4 +493,3 @@ window.customCards.push({
     name: "Location Timeline Card",
     description: "Daily location timeline from GPS history.",
 });
-
