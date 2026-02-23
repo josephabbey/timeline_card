@@ -90,7 +90,8 @@ function toLatLon(point) {
 async function fetchHistory(hass, entityId, date) {
     const states = await fetchEntityHistory(hass, entityId, date);
     return states
-        .map((state) => toPoint(state));
+        .map((state) => toPoint(state))
+        .filter(Boolean);
 }
 
 async function fetchEntityHistory(hass, entityId, date) {
