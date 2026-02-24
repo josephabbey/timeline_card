@@ -97,3 +97,17 @@ If `osm_api_key` is not set, unresolved stays remain **Unknown location**.
 - Zone labels are resolved from `zone.*` entities.
 - All timeline processing happens in the browser.
 - [Discussion post](https://community.home-assistant.io/t/location-timeline-card-to-easily-show-location-history/989513) on the Community
+
+### Fix GUI form not displaying `entity` or `places_entity` when card was set up prior to `v1.6.0`
+If your configuration form does not display `entity` or `places_entity` and you first set up your card prior to `v1.6.0`, this is due to a breaking change where the card now supports multiple users. 
+You can fix this by manually changing the YAML from
+```
+entity: person.my_person
+``` 
+to 
+```
+entity: 
+- person.my_person
+```
+
+You can replace `entity: null` or `places_entity: null` with `entity: []`

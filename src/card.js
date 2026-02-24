@@ -134,20 +134,6 @@ class TimelineCard extends HTMLElement {
         return getConfigFormSchema();
     }
 
-    static getStubConfig() {
-        return {
-            entity: ["device_tracker.your_device"],
-            places_entity: [],
-            osm_api_key: null,
-            stay_radius_m: 75,
-            min_stay_minutes: 10,
-            distance_unit: "metric",
-            map_appearance: "auto",
-            map_height_px: 200,
-            colors: [],
-        };
-    }
-
     _syncMapAppearance() {
         let darkMode = Boolean(this._hass?.themes?.darkMode);
         if (this._config.map_appearance === "dark") {

@@ -1,10 +1,10 @@
 export function getConfigFormSchema() {
     return {
         schema: [
-            {name: "entity", required: true, selector: {entity: {multiple: true}}},
+            {name: "entity", required: true, selector: {entity: {multiple: true, filter: [{domain: ["person", "device_tracker"]}]}}},
             {
                 type: "expandable", name: "", title: "Reverse geocoding", flatten: true, schema: [
-                    {name: "places_entity", selector: {entity: {multiple: true, filter: [{domain: "sensor"}]}}},
+                    {name: "places_entity", selector: {entity: {multiple: true, filter: [{domain: "sensor", integration: "places"}]}}},
                     {name: "activity_entity", selector: {entity: {multiple: true, filter: [{domain: "sensor"}]}}},
                     {name: "osm_api_key", selector: {text: {type: "email"}}},
                 ]
