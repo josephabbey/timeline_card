@@ -54,7 +54,7 @@ function renderSegment(segment, index, options) {
       <div class="line-slot"></div>
       <div class="content location travel">
         <ha-icon class="move-icon" icon="mdi:chart-line-variant"></ha-icon>
-        <div class="title">Moving<span class="meta"> - ${formatDistance(segment.distanceM, options.distanceUnit)}</span></div>
+        <div class="title">${escapeHtml(capitalizeFirst(segment.activityName || "Moving"))}<span class="meta"> - ${formatDistance(segment.distanceM, options.distanceUnit)}</span></div>
       </div>
       <div class="content time">
         <div class="meta">${formatDuration(segment.durationMs)}</div>
@@ -70,4 +70,9 @@ function escapeHtml(text) {
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
         .replaceAll("\"", "&quot;");
+}
+
+function capitalizeFirst(text) {
+    if (!text) return "";
+    return text.charAt(0).toUpperCase() + text.slice(1);
 }

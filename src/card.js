@@ -4,13 +4,14 @@ import {fetchEntityHistory, fetchHistory} from "./history.js";
 import {segmentTimeline} from "./segmentation.js";
 import {formatDate, getTrackColor, startOfDay, toDateKey, toLatLon} from "./utils.js";
 import {TimelineLeafletMap} from "./leaflet-map.js";
-import {clearPersistentCache, clearReverseGeocodingQueue, resolveStaySegments} from "./reverse-geocoding.js";
+import {clearPersistentCache, clearReverseGeocodingQueue, resolveMoveSegments, resolveStaySegments} from "./reverse-geocoding.js";
 import {renderTimeline} from "./timeline.js";
 import {getConfigFormSchema} from "./config-flow.js";
 
 const DEFAULT_CONFIG = {
     entity: [],
     places_entity: [],
+    activity_entity: [],
     osm_api_key: null,
     stay_radius_m: 75,
     min_stay_minutes: 10,
@@ -207,12 +208,17 @@ class TimelineCard extends HTMLElement {
         try {
             const entities = this._getEntities();
             const placesByEntity = this._getPlacesEntityMap();
+            const activityByEntity = this._getActivityEntityMap();
             const zones = this._collectZones();
             const tracks = await Promise.all(entities.map(async (entityId, index) => {
                 const points = await fetchHistory(this._hass, entityId, date);
                 const placeEntityId = placesByEntity.get(entityId) || null;
                 const placeStates = placeEntityId
                     ? await fetchEntityHistory(this._hass, placeEntityId, date)
+                    : [];
+                const activityEntityId = activityByEntity.get(entityId) || null;
+                const activityStates = activityEntityId
+                    ? await fetchEntityHistory(this._hass, activityEntityId, date)
                     : [];
                 const segments = segmentTimeline(points, {
                     stayRadiusM: this._config.stay_radius_m,
@@ -228,6 +234,7 @@ class TimelineCard extends HTMLElement {
                         this._render();
                     },
                 });
+                resolveMoveSegments(segments, activityStates, date);
 
                 return {entityId, placeEntityId, points, segments};
             }));
@@ -524,6 +531,20 @@ class TimelineCard extends HTMLElement {
             }
             map.set(trackerEntityId, placeEntityId);
         });
+
+        return map;
+    }
+
+    _getActivityEntityMap() {
+        const activityEntityIds = this._normalizeEntityList(this._config.activity_entity);
+        const trackedEntities = this._getEntities();
+        const map = new Map();
+
+        if (activityEntityIds.length == trackedEntities.length) {
+            trackedEntities.forEach((entityId, index) => {
+                map.set(entityId, activityEntityIds[index]);
+            });
+        }
 
         return map;
     }

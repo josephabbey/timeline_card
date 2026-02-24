@@ -48,6 +48,7 @@ When multiple entities are configured, the card renders all tracks on the map an
 | `entity` | string[] | **required** | One or more `device_tracker`/`person` entities to pull GPS history from. | 
 | **Reverse geocoding** |  |  | see [Reverse Geocoding](#reverse-geocoding) below|
 | `places_entity` | string[] | `[]` | Optional `sensor` entity (or list) from Places integration used first for reverse geocoding. Lists must match `entity` order/count when provided. |
+| `activity_entity` | string[] | `[]` | Optional `sensor` entity (or list) that tracks the current activity (e.g. walking, running). When set, move segments display the activity name instead of "Moving". |
 | `osm_api_key` | string | `null` | Optional OSM Nominatim email address (used as API key) for reverse geocoding fallback. |
 | **Detection parameters** |  |  |  |
 | `stay_radius_m` | number | `75` | Radius (meters) used to detect a stay. |

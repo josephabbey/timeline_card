@@ -5,6 +5,7 @@ export function getConfigFormSchema() {
             {
                 type: "expandable", name: "", title: "Reverse geocoding", flatten: true, schema: [
                     {name: "places_entity", selector: {entity: {multiple: true, filter: [{domain: "sensor"}]}}},
+                    {name: "activity_entity", selector: {entity: {multiple: true, filter: [{domain: "sensor"}]}}},
                     {name: "osm_api_key", selector: {text: {type: "email"}}},
                 ]
             },
