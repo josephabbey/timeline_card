@@ -1,17 +1,18 @@
-import {endOfDay, startOfDay} from "./utils.js";
+import {endOfDay, startOfDay} from "./utils";
+import type {GpsPoint, HassLike, NormalizedState} from "./types";
 
-export async function fetchHistory(hass, entityId, date) {
+export async function fetchHistory(hass: HassLike, entityId: string, date: Date): Promise<GpsPoint[]> {
     const states = await fetchEntityHistory(hass, entityId, date);
     return states
         .map((state) => toPoint(state))
-        .filter(Boolean);
+        .filter((p): p is GpsPoint => p !== null);
 }
 
-export async function fetchEntityHistory(hass, entityId, date) {
+export async function fetchEntityHistory(hass: HassLike, entityId: string, date: Date): Promise<NormalizedState[]> {
     if (!hass || !entityId) return [];
     const start = startOfDay(date);
     const end = endOfDay(date);
-    const message = {
+    const message: Record<string, unknown> = {
         type: "history/history_during_period",
         start_time: start.toISOString(),
         end_time: end.toISOString(),
@@ -23,10 +24,10 @@ export async function fetchEntityHistory(hass, entityId, date) {
 
     const response = await callWS(hass, message);
     const states = extractEntityStates(response, entityId);
-    return states.map((state) => normalizeState(state)).filter(Boolean);
+    return states.map((state) => normalizeState(state)).filter((s): s is NormalizedState => s !== null);
 }
 
-async function callWS(hass, message) {
+async function callWS(hass: HassLike, message: Record<string, unknown>): Promise<unknown> {
     if (typeof hass.callWS === "function") {
         return hass.callWS(message);
     }
@@ -36,33 +37,33 @@ async function callWS(hass, message) {
     throw new Error("Home Assistant connection not available");
 }
 
-function extractEntityStates(response, entityId) {
+function extractEntityStates(response: unknown, entityId: string): Record<string, unknown>[] {
     if (!response) return [];
     if (!Array.isArray(response) && typeof response === "object") {
-        const list = response[entityId];
-        return Array.isArray(list) ? list : [];
+        const list = (response as Record<string, unknown>)[entityId];
+        return Array.isArray(list) ? list as Record<string, unknown>[] : [];
     }
     if (!Array.isArray(response)) return [];
     if (response.length === 0) return [];
     if (Array.isArray(response[0])) {
-        return response[0] || [];
+        return (response[0] || []) as Record<string, unknown>[];
     }
-    return response.filter((state) => state.entity_id === entityId);
+    return (response as Record<string, unknown>[]).filter((state) => state.entity_id === entityId);
 }
 
-function normalizeState(state) {
+function normalizeState(state: Record<string, unknown>): NormalizedState | null {
     if (!state) return null;
-    const attrs = state.attributes || state.a || {};
+    const attrs = (state.attributes || state.a || {}) as Record<string, unknown>;
     const tsValue = state.last_changed || state.last_updated || state.created || state.timestamp || state.lu;
-    const ts = tsValue ? new Date(tsValue * 1000 || tsValue) : new Date();
+    const ts = tsValue ? new Date((tsValue as number) * 1000 || (tsValue as string | number)) : new Date();
     return {
-        state: state.state ?? state.s ?? null,
+        state: (state.state ?? state.s ?? null) as string | null,
         attributes: attrs,
         ts,
     };
 }
 
-function toPoint(state) {
+function toPoint(state: NormalizedState): GpsPoint | null {
     const attrs = state.attributes || {};
     let lat = Number(attrs.latitude);
     let lon = Number(attrs.longitude);

@@ -1,11 +1,53 @@
 import Leaflet from "leaflet";
-import {getTrackColor} from "./utils.js";
+import type {LatLon, GpsPoint, Segment, StaySegment, Track} from "./types";
+import {getTrackColor} from "./utils";
 
-const DEFAULT_CENTER = [52.3731339, 4.8903147];
+function toLeafletLatLng(coord: LatLon): Leaflet.LatLngExpression {
+    return {lat: coord.lat, lng: coord.lon};
+}
+
+const DEFAULT_CENTER: [number, number] = [52.3731339, 4.8903147];
 const DEFAULT_ZOOM = 13;
 
+interface MapPath {
+    entityIndex?: number;
+    isActive?: boolean;
+    points: GpsPoint[];
+    color: string;
+    opacity: number;
+    weight: number;
+    borderWeight?: number;
+}
+
+interface SetDaySegmentsOptions {
+    tracks?: Track[];
+    activeEntityIndex?: number;
+    onTrackClick?: ((entityIndex: number) => void) | null;
+    colors?: string[];
+}
+
+interface FitMapOptions {
+    defer?: boolean;
+    bounds?: LatLon[] | null;
+    pad?: number;
+}
+
 export class TimelineLeafletMap {
-    constructor(mapElement) {
+    private _Leaflet: typeof Leaflet;
+    private _mapElement: HTMLElement;
+    private _leafletMap: Leaflet.Map;
+    private _tileLayer: Leaflet.TileLayer;
+    private _mapLayers: Leaflet.Layer[];
+    private _fullDayPaths: MapPath[];
+    private _fullDayPath: MapPath;
+    private _highlightedPath: MapPath[];
+    private _highlightedStay: StaySegment | null;
+    private _isTravelHighlightActive: boolean;
+    private _isMapZoomedToSegmentValue: boolean;
+    private _activeTrackColor: string;
+    private _onTrackClick: ((entityIndex: number) => void) | null;
+
+    constructor(mapElement: HTMLElement) {
         if (!mapElement?.isConnected) {
             throw new Error("Cannot setup Leaflet map on disconnected element");
         }
@@ -21,37 +63,39 @@ export class TimelineLeafletMap {
 
         this._mapLayers = [];
         this._fullDayPaths = [];
-        this._fullDayPath = [];
+        this._fullDayPath = {points: [], color: "", opacity: 1, weight: 4};
         this._highlightedPath = [];
         this._highlightedStay = null;
         this._isTravelHighlightActive = false;
-        this._isMapZoomedToSegment = false;
+        this._isMapZoomedToSegmentValue = false;
+        this._activeTrackColor = "var(--primary-color)";
+        this._onTrackClick = null;
 
         this.setDarkMode(false);
 
         requestAnimationFrame(() => this._leafletMap.invalidateSize());
     }
 
-    setDarkMode(isDarkMode) {
+    setDarkMode(isDarkMode: boolean): void {
         this._mapElement?.classList.toggle("dark", Boolean(isDarkMode));
     }
 
-    destroy() {
+    destroy(): void {
         this._leafletMap.remove();
         this._mapLayers = [];
-        this._fullDayPath = [];
+        this._fullDayPath = {points: [], color: "", opacity: 1, weight: 4};
         this._fullDayPaths = [];
         this._highlightedPath = [];
         this._highlightedStay = null;
     }
 
-    get isMapZoomedToSegment() {
-        return this._isMapZoomedToSegment;
+    get isMapZoomedToSegment(): boolean {
+        return this._isMapZoomedToSegmentValue;
     }
 
-    setDaySegments({tracks = [], activeEntityIndex = 0, onTrackClick = null, colors = []}) {
+    setDaySegments({tracks = [], activeEntityIndex = 0, onTrackClick = null, colors = []}: SetDaySegmentsOptions): void {
         this._fullDayPaths = tracks.map((track, index) => {
-            const points = [];
+            const points: GpsPoint[] = [];
             const segments = Array.isArray(track?.segments) ? track.segments : [];
             segments.forEach((segment) => {
                 if (segment?.type === "stay" && segment.center) {
@@ -73,20 +117,20 @@ export class TimelineLeafletMap {
             };
         });
 
-        this._fullDayPath = this._fullDayPaths[activeEntityIndex] || {points: []};
+        this._fullDayPath = this._fullDayPaths[activeEntityIndex] || {points: [], color: "", opacity: 1, weight: 4};
         this._activeTrackColor = this._fullDayPaths[activeEntityIndex]?.color || "var(--primary-color)";
         this._onTrackClick = typeof onTrackClick === "function" ? onTrackClick : null;
 
         this._highlightedPath = [];
         this._highlightedStay = null;
         this._isTravelHighlightActive = false;
-        this._isMapZoomedToSegment = false;
+        this._isMapZoomedToSegmentValue = false;
 
         const activeSegments = tracks[activeEntityIndex]?.segments || [];
         this._drawMapPaths(activeSegments);
     }
 
-    highlightSegment(segment, segments) {
+    highlightSegment(segment: Segment, segments: Segment[]): void {
         this._highlightedPath = [];
         this._highlightedStay = null;
         this._isTravelHighlightActive = false;
@@ -101,7 +145,7 @@ export class TimelineLeafletMap {
         this._drawMapPaths(segments);
     }
 
-    clearHighlight(segments) {
+    clearHighlight(segments: Segment[]): void {
         if (!this._highlightedPath.length && !this._highlightedStay && !this._isTravelHighlightActive) {
             return;
         }
@@ -113,32 +157,33 @@ export class TimelineLeafletMap {
         this._drawMapPaths(segments);
     }
 
-    resetMapZoom() {
-        this._isMapZoomedToSegment = false;
+    resetMapZoom(): void {
+        this._isMapZoomedToSegmentValue = false;
         this.fitMap();
     }
 
-    zoomToStay(stay) {
+    zoomToStay(stay: StaySegment): void {
         if (!stay?.center) return;
-        this._isMapZoomedToSegment = true;
+        this._isMapZoomedToSegmentValue = true;
         this.fitMap({bounds: [stay.center], defer: false});
     }
 
-    zoomToPoints(points) {
+    zoomToPoints(points: LatLon[]): void {
         if (!Array.isArray(points) || points.length < 2) return;
-        this._isMapZoomedToSegment = true;
+        this._isMapZoomedToSegmentValue = true;
         this.fitMap({bounds: points, defer: false});
     }
 
-    fitMap({defer = false, bounds = null, pad = 0.1} = {}) {
+    fitMap({defer = false, bounds = null, pad = 0.1}: FitMapOptions = {}): void {
         if (bounds === null) {
-            bounds = this._fullDayPath?.points?.map((point) => point.point) || [];
-            if (!bounds.length) return;
+            const mappedPoints = this._fullDayPath?.points?.map((point) => ({lat: point.point[0], lon: point.point[1]})) || [];
+            if (!mappedPoints.length) return;
+            bounds = mappedPoints;
         }
 
         const normalizedBounds = bounds
             .map(normalizeLatLng)
-            .filter((point) => point && Number.isFinite(point.lat) && Number.isFinite(point.lng));
+            .filter((point): point is {lat: number; lng: number} => point !== null && Number.isFinite(point.lat) && Number.isFinite(point.lng));
         if (!normalizedBounds.length) return;
 
         const paddedBounds = this._Leaflet.latLngBounds(normalizedBounds).pad(pad);
@@ -151,7 +196,7 @@ export class TimelineLeafletMap {
         }
     }
 
-    _drawMapPaths(segments) {
+    private _drawMapPaths(segments: Segment[]): void {
         this._mapLayers.forEach((layer) => layer.remove());
         this._mapLayers = [];
 
@@ -160,9 +205,9 @@ export class TimelineLeafletMap {
         this._mapLayers.forEach((layer) => this._leafletMap.addLayer(layer));
     }
 
-    _drawMapMarkers(segments) {
+    private _drawMapMarkers(segments: Segment[]): void {
         const stayMarkers = Array.isArray(segments)
-            ? segments.filter((segment) => segment?.type === "stay")
+            ? segments.filter((segment): segment is StaySegment => segment?.type === "stay")
             : [];
 
         stayMarkers.forEach((stay) => {
@@ -173,10 +218,10 @@ export class TimelineLeafletMap {
                 backgroundColor: this._activeTrackColor,
                 borderColor: `color-mix(in srgb, black 30%, ${this._activeTrackColor})`,
                 iconPadding: "2px",
-                leafletIconSize: [22, 22],
+                leafletIconSize: [22, 22] as [number, number],
             });
 
-            this._mapLayers.push(this._Leaflet.marker(stay.center, {icon, zIndexOffset: 100}));
+            this._mapLayers.push(this._Leaflet.marker(toLeafletLatLng(stay.center), {icon, zIndexOffset: 100}));
         });
 
         if (!this._highlightedStay) return;
@@ -187,13 +232,13 @@ export class TimelineLeafletMap {
             iconSize: 22,
             backgroundColor: "var(--accent-color)",
             borderColor: "color-mix(in srgb, black 30%, var(--accent-color))",
-            leafletIconSize: [26, 26],
+            leafletIconSize: [26, 26] as [number, number],
         });
 
-        this._mapLayers.push(this._Leaflet.marker(this._highlightedStay.center, {icon, zIndexOffset: 1000}));
+        this._mapLayers.push(this._Leaflet.marker(toLeafletLatLng(this._highlightedStay.center), {icon, zIndexOffset: 1000}));
     }
 
-    _drawMapLines() {
+    private _drawMapLines(): void {
         const inactivePaths = this._fullDayPaths.filter((path) => !path.isActive);
         const activePaths = this._fullDayPaths.filter((path) => path.isActive);
         const paths = [...inactivePaths, ...activePaths, ...this._highlightedPath];
@@ -217,14 +262,24 @@ export class TimelineLeafletMap {
             });
             line.on("click", () => {
                 if (!Number.isInteger(path.entityIndex) || !this._onTrackClick) return;
-                this._onTrackClick(path.entityIndex);
+                this._onTrackClick(path.entityIndex!);
             });
             this._mapLayers.push(line);
         });
     }
 }
 
-const createMarkerIcon = ({iconName, markerSize, iconSize, backgroundColor, borderColor, leafletIconSize, iconPadding = "0"}) => {
+interface MarkerIconOptions {
+    iconName: string;
+    markerSize: number;
+    iconSize: number;
+    backgroundColor: string;
+    borderColor: string;
+    leafletIconSize: [number, number];
+    iconPadding?: string;
+}
+
+const createMarkerIcon = ({iconName, markerSize, iconSize, backgroundColor, borderColor, leafletIconSize, iconPadding = "0"}: MarkerIconOptions): Leaflet.DivIcon => {
     const haIcon = document.createElement("ha-icon");
     haIcon.setAttribute("icon", iconName);
     haIcon.setAttribute("style", `color: white; --mdc-icon-size: ${iconSize}px; padding: ${iconPadding}`);
@@ -236,7 +291,7 @@ const createMarkerIcon = ({iconName, markerSize, iconSize, backgroundColor, bord
     return Leaflet.divIcon({html: iconDiv, className: "my-leaflet-icon", iconSize: leafletIconSize});
 };
 
-const createTileLayer = (leaflet) => leaflet.tileLayer(
+const createTileLayer = (leaflet: typeof Leaflet): Leaflet.TileLayer => leaflet.tileLayer(
     `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}${leaflet.Browser.retina ? "@2x.png" : ".png"}`,
     {
         attribution:
@@ -247,17 +302,17 @@ const createTileLayer = (leaflet) => leaflet.tileLayer(
     }
 );
 
-const normalizeLatLng = (point) => {
+const normalizeLatLng = (point: LatLon | [number, number] | Record<string, unknown>): {lat: number; lng: number} | null => {
     if (Array.isArray(point) && point.length >= 2) {
         return {lat: Number(point[0]), lng: Number(point[1])};
     }
     if (!point || typeof point !== "object") return null;
-    if (Number.isFinite(point.lat) && Number.isFinite(point.lng)) {
-        return {lat: Number(point.lat), lng: Number(point.lng)};
+    const p = point as Record<string, unknown>;
+    if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
+        return {lat: Number(p.lat), lng: Number(p.lng)};
     }
-    if (Number.isFinite(point.lat) && Number.isFinite(point.lon)) {
-        return {lat: Number(point.lat), lng: Number(point.lon)};
+    if (Number.isFinite(p.lat) && Number.isFinite(p.lon)) {
+        return {lat: Number(p.lat), lng: Number(p.lon)};
     }
     return null;
 };
-

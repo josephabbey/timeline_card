@@ -1,21 +1,22 @@
 import {formatTime as formatTimeHelper} from "custom-card-helpers";
+import type {GpsPoint, HassLocale, LatLon} from "./types";
 
-export function toDateKey(date) {
+export function toDateKey(date: Date): string {
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, "0");
     const d = String(date.getDate()).padStart(2, "0");
     return `${y}-${m}-${d}`;
 }
 
-export function startOfDay(date) {
+export function startOfDay(date: Date): Date {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
 }
 
-export function endOfDay(date) {
+export function endOfDay(date: Date): Date {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
 }
 
-export function formatDate(date) {
+export function formatDate(date: Date): string {
     try {
         return new Intl.DateTimeFormat(undefined, {
             weekday: "short",
@@ -28,19 +29,17 @@ export function formatDate(date) {
     }
 }
 
-export function formatTime(date, locale) {
+export function formatTime(date: Date, locale?: HassLocale): string {
     return formatTimeHelper(date, locale);
-    try {
-        return new Intl.DateTimeFormat(undefined, {
-            hour: "2-digit",
-            minute: "2-digit",
-        }).format(date);
-    } catch {
-        return date.toLocaleTimeString();
-    }
 }
 
-export function formatTimeRange(start, end, options={}) {
+export interface TimeRangeOptions {
+    hideStartTime?: boolean;
+    hideEndTime?: boolean;
+    locale?: HassLocale;
+}
+
+export function formatTimeRange(start: Date, end: Date, options: TimeRangeOptions = {}): string {
     const hideStartTime = options.hideStartTime || false;
     const hideEndTime = options.hideEndTime || false;
     const locale = options.locale || {language: "en", time_format: "language"};
@@ -56,7 +55,7 @@ export function formatTimeRange(start, end, options={}) {
     }
 }
 
-export function formatDuration(ms) {
+export function formatDuration(ms: number): string {
     const totalMinutes = ms > 0 ? Math.max(1, Math.round(ms / 60000)) : 0;
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
@@ -66,7 +65,7 @@ export function formatDuration(ms) {
     return `${minutes} min`;
 }
 
-export function formatDistance(meters, distanceUnit = "metric") {
+export function formatDistance(meters: number, distanceUnit: string = "metric"): string {
     if (!Number.isFinite(meters)) return "0 m";
 
     if (distanceUnit === "imperial") {
@@ -83,8 +82,8 @@ export function formatDistance(meters, distanceUnit = "metric") {
     return `${Math.round(meters)} m`;
 }
 
-export function haversineMeters(a, b) {
-    const toRad = (deg) => (deg * Math.PI) / 180;
+export function haversineMeters(a: LatLon, b: LatLon): number {
+    const toRad = (deg: number): number => (deg * Math.PI) / 180;
     const r = 6371000;
     const dLat = toRad(b.lat - a.lat);
     const dLon = toRad(b.lon - a.lon);
@@ -96,11 +95,11 @@ export function haversineMeters(a, b) {
     return r * c;
 }
 
-export function toLatLon(point) {
-    return {lat: point.point[0], lon: point.point[1]}
+export function toLatLon(point: GpsPoint): LatLon {
+    return {lat: point.point[0], lon: point.point[1]};
 }
 
-export function getTrackColor(index, colors = []) {
+export function getTrackColor(index: number, colors: string[] = []): string {
     if (colors.length) {
         return colors[index % colors.length];
     }

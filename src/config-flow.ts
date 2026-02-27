@@ -1,4 +1,8 @@
-export function getConfigFormSchema() {
+interface ConfigFormSchema {
+    schema: unknown[];
+}
+
+export function getConfigFormSchema(): ConfigFormSchema {
     return {
         schema: [
             {name: "entity", required: true, selector: {entity: {multiple: true, filter: [{domain: ["person", "device_tracker"]}]}}},

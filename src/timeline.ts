@@ -1,6 +1,12 @@
-import {formatDistance, formatDuration, formatTimeRange} from "./utils.js";
+import {formatDistance, formatDuration, formatTimeRange} from "./utils";
+import type {HassLocale, Segment} from "./types";
 
-export function renderTimeline(segments, options = {}) {
+interface RenderOptions {
+    locale?: HassLocale;
+    distanceUnit?: string;
+}
+
+export function renderTimeline(segments: Segment[], options: RenderOptions = {}): string {
     if (!segments || segments.length === 0) {
         return `<div class="empty">No location history for this day.</div>`;
     }
@@ -26,7 +32,14 @@ export function renderTimeline(segments, options = {}) {
   `;
 }
 
-function renderSegment(segment, index, options) {
+interface SegmentRenderOptions {
+    locale?: HassLocale;
+    distanceUnit: string;
+    hideStartTime: boolean;
+    hideEndTime: boolean;
+}
+
+function renderSegment(segment: Segment, index: number, options: SegmentRenderOptions): string {
     if (segment.type === "stay") {
         return `
           <div class="entry stay" data-segment-index="${index}" data-segment-type="stay">
@@ -63,7 +76,7 @@ function renderSegment(segment, index, options) {
   `;
 }
 
-function escapeHtml(text) {
+function escapeHtml(text: string): string {
     if (!text) return "";
     return text
         .replaceAll("&", "&amp;")
@@ -72,7 +85,7 @@ function escapeHtml(text) {
         .replaceAll("\"", "&quot;");
 }
 
-function capitalizeFirst(text) {
+function capitalizeFirst(text: string): string {
     if (!text) return "";
     return text.charAt(0).toUpperCase() + text.slice(1);
 }

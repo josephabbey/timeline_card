@@ -1,15 +1,28 @@
 import css from "./card.css";
 import leafletCss from "leaflet/dist/leaflet.css";
-import {fetchEntityHistory, fetchHistory} from "./history.js";
-import {segmentTimeline} from "./segmentation.js";
-import {formatDate, getTrackColor, startOfDay, toDateKey, toLatLon} from "./utils.js";
-import {TimelineLeafletMap} from "./leaflet-map.js";
-import {clearPersistentCache, clearReverseGeocodingQueue, resolveStaySegments} from "./reverse-geocoding.js";
-import {resolveMoveSegments} from "./activity.js";
-import {renderTimeline} from "./timeline.js";
-import {getConfigFormSchema} from "./config-flow.js";
+import {fetchEntityHistory, fetchHistory} from "./history";
+import {segmentTimeline} from "./segmentation";
+import {formatDate, getTrackColor, startOfDay, toDateKey, toLatLon} from "./utils";
+import {TimelineLeafletMap} from "./leaflet-map";
+import {clearPersistentCache, clearReverseGeocodingQueue, resolveStaySegments} from "./reverse-geocoding";
+import {resolveMoveSegments} from "./activity";
+import {renderTimeline} from "./timeline";
+import {getConfigFormSchema} from "./config-flow";
+import type {DayData, GpsPoint, HassLike, Segment, StaySegment, TimelineCardConfig, Track, Zone} from "./types";
 
-const DEFAULT_CONFIG = {
+interface CustomCardsEntry {
+    type: string;
+    name: string;
+    description: string;
+}
+
+declare global {
+    interface Window {
+        customCards: CustomCardsEntry[];
+    }
+}
+
+const DEFAULT_CONFIG: TimelineCardConfig = {
     entity: [],
     places_entity: [],
     activity_entity: [],
@@ -23,6 +36,17 @@ const DEFAULT_CONFIG = {
 };
 
 class TimelineCard extends HTMLElement {
+    private _config: TimelineCardConfig;
+    private _cache: Map<string, DayData>;
+    private _selectedDate: Date;
+    private _hass: HassLike | null;
+    private _rendered: boolean;
+    private _touchStart: {x: number; y: number} | null;
+    private _activeEntityIndex: number;
+    private _mapView?: TimelineLeafletMap;
+    private _baseLayoutReady?: boolean;
+    private _isLoadingMap?: boolean;
+
     constructor() {
         super();
         this.attachShadow({mode: "open"});
@@ -34,8 +58,8 @@ class TimelineCard extends HTMLElement {
         this._touchStart = null;
         this._activeEntityIndex = 0;
 
-        this.shadowRoot.addEventListener("click", (event) => {
-            const target = event.target.closest("[data-action]");
+        this.shadowRoot!.addEventListener("click", (event) => {
+            const target = (event.target as HTMLElement).closest("[data-action]") as HTMLElement | null;
             if (!target) return;
             const action = target.dataset.action;
             if (action === "prev") {
@@ -56,7 +80,7 @@ class TimelineCard extends HTMLElement {
         });
 
 
-        this.shadowRoot.addEventListener("change", (event) => {
+        this.shadowRoot!.addEventListener("change", (event) => {
             const target = event.target;
             if (!(target instanceof HTMLInputElement) || target.id !== "timeline-date-picker") return;
             if (!target.value) return;
@@ -67,33 +91,34 @@ class TimelineCard extends HTMLElement {
             }
         });
 
-        this.shadowRoot.addEventListener("mouseover", (event) => {
-            const entry = event.target.closest("[data-segment-index]");
-            if (!entry || !this.shadowRoot.contains(entry)) return;
-            if (entry.contains(event.relatedTarget)) return;
+        this.shadowRoot!.addEventListener("mouseover", (event: Event) => {
+            const mouseEvent = event as MouseEvent;
+            const entry = (mouseEvent.target as HTMLElement).closest("[data-segment-index]") as HTMLElement | null;
+            if (!entry || !this.shadowRoot!.contains(entry)) return;
+            if (entry.contains(mouseEvent.relatedTarget as Node)) return;
             this._handleSegmentHoverStart(Number(entry.dataset.segmentIndex));
         });
 
-        this.shadowRoot.addEventListener("mouseout", (event) => {
-            const entry = event.target.closest("[data-segment-index]");
-            if (!entry || !this.shadowRoot.contains(entry)) return;
-            if (entry.contains(event.relatedTarget)) return;
+        this.shadowRoot!.addEventListener("mouseout", (event: Event) => {
+            const mouseEvent = event as MouseEvent;
+            const entry = (mouseEvent.target as HTMLElement).closest("[data-segment-index]") as HTMLElement | null;
+            if (!entry || !this.shadowRoot!.contains(entry)) return;
+            if (entry.contains(mouseEvent.relatedTarget as Node)) return;
             this._clearHoverHighlight();
         });
 
-        this.shadowRoot.addEventListener("click", (event) => {
-            const entry = event.target.closest("[data-segment-index]");
-            if (!entry || !this.shadowRoot.contains(entry)) return;
-            if (entry.contains(event.relatedTarget)) return;
+        this.shadowRoot!.addEventListener("click", (event) => {
+            const entry = (event.target as HTMLElement).closest("[data-segment-index]") as HTMLElement | null;
+            if (!entry || !this.shadowRoot!.contains(entry)) return;
             this._handleSegmentClick(Number(entry.dataset.segmentIndex));
         });
     }
 
-    setConfig(config) {
+    setConfig(config: Partial<TimelineCardConfig> & {entity: string | string[]}): void {
         if (!config || !config.entity) {
             throw new Error("You need to define an entity");
         }
-        this._config = {...DEFAULT_CONFIG, ...config};
+        this._config = {...DEFAULT_CONFIG, ...config} as TimelineCardConfig;
         if (config.distance_unit === undefined) {
             this._config.distance_unit = "metric";
         } else if (config.distance_unit !== "metric" && config.distance_unit !== "imperial") {
@@ -117,7 +142,7 @@ class TimelineCard extends HTMLElement {
         this._render();
     }
 
-    set hass(hass) {
+    set hass(hass: HassLike) {
         this._hass = hass;
         this._syncMapAppearance();
         if (!this._config.entity) return;
@@ -131,11 +156,11 @@ class TimelineCard extends HTMLElement {
         }
     }
 
-    static getConfigForm() {
+    static getConfigForm(): ReturnType<typeof getConfigFormSchema> {
         return getConfigFormSchema();
     }
 
-    _syncMapAppearance() {
+    private _syncMapAppearance(): void {
         let darkMode = Boolean(this._hass?.themes?.darkMode);
         if (this._config.map_appearance === "dark") {
             darkMode = true;
@@ -145,17 +170,17 @@ class TimelineCard extends HTMLElement {
         this._mapView?.setDarkMode(darkMode);
     }
 
-    _applyMapHeight() {
+    private _applyMapHeight(): void {
         const mapElement = this.shadowRoot?.getElementById("overview-map");
         if (!mapElement) return;
         mapElement.style.setProperty("height", `${this._config.map_height_px}px`, "important");
     }
 
-    getCardSize() {
+    getCardSize(): number {
         return 6;
     }
 
-    _shiftDate(direction) {
+    private _shiftDate(direction: number): void {
         clearReverseGeocodingQueue();
 
         const today = startOfDay(new Date());
@@ -169,23 +194,23 @@ class TimelineCard extends HTMLElement {
         this._ensureDay(this._selectedDate).then(() => this._render());
     }
 
-    _resetMapZoom() {
+    private _resetMapZoom(): void {
         this._mapView?.resetMapZoom();
         this._updateMapResetButton();
     }
 
-    _refreshCurrentDay() {
+    private _refreshCurrentDay(): void {
         const key = toDateKey(this._selectedDate);
         this._cache.delete(key);
         this._ensureDay(this._selectedDate).then(() => this._render());
     }
 
-    _logCacheToConsole() {
+    private _logCacheToConsole(): void {
         console.log("%c[Location Timeline Debug]", "color: white; background-color: #03a9f4; font-weight: bold;");
         console.log(JSON.stringify(this._cache.get(toDateKey(this._selectedDate))));
     }
 
-    async _ensureDay(date) {
+    private async _ensureDay(date: Date): Promise<void> {
         const key = toDateKey(date);
         const existing = this._cache.get(key);
         if (existing && (existing.tracks || existing.loading)) return;
@@ -197,15 +222,15 @@ class TimelineCard extends HTMLElement {
             const placesByEntity = this._getPlacesEntityMap();
             const activityByEntity = this._getActivityEntityMap();
             const zones = this._collectZones();
-            const tracks = await Promise.all(entities.map(async (entityId, index) => {
-                const points = await fetchHistory(this._hass, entityId, date);
+            const tracks: Track[] = await Promise.all(entities.map(async (entityId) => {
+                const points = await fetchHistory(this._hass!, entityId, date);
                 const placeEntityId = placesByEntity.get(entityId) || null;
                 const placeStates = placeEntityId
-                    ? await fetchEntityHistory(this._hass, placeEntityId, date)
+                    ? await fetchEntityHistory(this._hass!, placeEntityId, date)
                     : [];
                 const activityEntityId = activityByEntity.get(entityId) || null;
                 const activityStates = activityEntityId
-                    ? await fetchEntityHistory(this._hass, activityEntityId, date)
+                    ? await fetchEntityHistory(this._hass!, activityEntityId, date)
                     : [];
                 const segments = segmentTimeline(points, {
                     stayRadiusM: this._config.stay_radius_m,
@@ -243,13 +268,13 @@ class TimelineCard extends HTMLElement {
         });
     }
 
-    _collectZones() {
+    private _collectZones(): Zone[] {
         if (!this._hass || !this._hass.states) return [];
         return Object.values(this._hass.states)
                      .filter((state) => state.entity_id && state.entity_id.startsWith("zone.") && state.attributes?.passive !== true)
                      .map((state) => ({
-                         name: state.attributes?.friendly_name || state.entity_id,
-                         icon: state.attributes?.icon || null,
+                         name: (state.attributes?.friendly_name as string) || state.entity_id,
+                         icon: (state.attributes?.icon as string) || null,
                          lat: Number(state.attributes?.latitude),
                          lon: Number(state.attributes?.longitude),
                          radius: Number(state.attributes?.radius) || 100,
@@ -257,7 +282,7 @@ class TimelineCard extends HTMLElement {
                      .filter((zone) => Number.isFinite(zone.lat) && Number.isFinite(zone.lon));
     }
 
-    _render() {
+    private _render(): void {
         if (!this.shadowRoot) return;
         this._ensureBaseLayout();
 
@@ -267,20 +292,20 @@ class TimelineCard extends HTMLElement {
         };
         const isFuture = this._selectedDate >= startOfDay(new Date());
 
-        const dateEl = this.shadowRoot.getElementById("timeline-date");
+        const dateEl = this.shadowRoot.getElementById("timeline-date")!;
         dateEl.textContent = formatDate(this._selectedDate);
 
-        const datePicker = this.shadowRoot.getElementById("timeline-date-picker");
+        const datePicker = this.shadowRoot.getElementById("timeline-date-picker") as HTMLInputElement;
         datePicker.value = toDateKey(this._selectedDate);
         datePicker.max = toDateKey(new Date());
 
-        const nextButton = this.shadowRoot.querySelector("[data-action='next']");
+        const nextButton = this.shadowRoot.querySelector("[data-action='next']") as HTMLElement;
         nextButton.toggleAttribute("disabled", isFuture);
 
         this._applyMapHeight();
 
-        const body = this.shadowRoot.getElementById("timeline-body");
-        const selector = this.shadowRoot.getElementById("entity-selector");
+        const body = this.shadowRoot.getElementById("timeline-body")!;
+        const selector = this.shadowRoot.getElementById("entity-selector")!;
         selector.innerHTML = this._renderEntitySelector();
         selector.toggleAttribute("hidden", this._getEntities().length < 2);
         this._bindTimelineTouch(body);
@@ -295,11 +320,11 @@ class TimelineCard extends HTMLElement {
         this._rendered = true;
     }
 
-    _ensureBaseLayout() {
+    private _ensureBaseLayout(): void {
         if (this._baseLayoutReady) return;
         this._baseLayoutReady = true;
 
-        this.shadowRoot.innerHTML = `
+        this.shadowRoot!.innerHTML = `
           <style>${css}\n${leafletCss}</style>
           <ha-card>
             <div class="card">
@@ -332,25 +357,25 @@ class TimelineCard extends HTMLElement {
     }
 
 
-    _openDatePicker() {
-        const input = this.shadowRoot?.getElementById("timeline-date-picker");
+    private _openDatePicker(): void {
+        const input = this.shadowRoot?.getElementById("timeline-date-picker") as HTMLInputElement | null;
         if (!input) return;
-        if (typeof input.showPicker === "function") {
-            input.showPicker();
+        if (typeof (input as HTMLInputElement & {showPicker?: () => void}).showPicker === "function") {
+            (input as HTMLInputElement & {showPicker: () => void}).showPicker();
             return;
         }
         input.focus();
         input.click();
     }
 
-    _updateMapResetButton() {
+    private _updateMapResetButton(): void {
         const resetBtn = this.shadowRoot?.getElementById("map-reset-zoom");
         if (!resetBtn) return;
         resetBtn.toggleAttribute("hidden", !this._mapView?.isMapZoomedToSegment);
     }
 
-    _bindTimelineTouch(body) {
-        if (!body || body.dataset.swipeBound === "true") return;
+    private _bindTimelineTouch(body: HTMLElement): void {
+        if (!body || (body as HTMLElement & {dataset: DOMStringMap}).dataset.swipeBound === "true") return;
         body.dataset.swipeBound = "true";
 
         body.addEventListener("touchstart", (event) => {
@@ -375,8 +400,8 @@ class TimelineCard extends HTMLElement {
         }, {passive: true});
     }
 
-    async _attachMapCard() {
-        const container = this.shadowRoot.getElementById("overview-map");
+    private async _attachMapCard(): Promise<void> {
+        const container = this.shadowRoot!.getElementById("overview-map");
         if (!container || this._mapView || this._isLoadingMap) return;
         if (!this.isConnected || !container.isConnected) {
             requestAnimationFrame(() => this._attachMapCard());
@@ -396,7 +421,7 @@ class TimelineCard extends HTMLElement {
         }
     }
 
-    _refreshMapPaths() {
+    private _refreshMapPaths(): void {
         const dayData = this._getCurrentDayData();
         if (!dayData || dayData.loading || dayData.error || !this._mapView) return;
 
@@ -405,7 +430,7 @@ class TimelineCard extends HTMLElement {
             this._mapView.setDaySegments({
                 tracks,
                 activeEntityIndex: this._activeEntityIndex,
-                onTrackClick: (entityIndex) => this._setActiveEntityIndex(entityIndex),
+                onTrackClick: (entityIndex: number) => this._setActiveEntityIndex(entityIndex),
                 colors: this._getColors(),
             });
             this._touchStart = null;
@@ -418,7 +443,7 @@ class TimelineCard extends HTMLElement {
         }
     }
 
-    _handleSegmentHoverStart(segmentIndex) {
+    private _handleSegmentHoverStart(segmentIndex: number): void {
         if (!Number.isInteger(segmentIndex)) return;
         const dayData = this._getCurrentDayData();
         const track = this._getCurrentTrackDayData(dayData);
@@ -432,7 +457,7 @@ class TimelineCard extends HTMLElement {
         this._mapView.highlightSegment(segment, segments);
     }
 
-    _clearHoverHighlight() {
+    private _clearHoverHighlight(): void {
         if (!this._mapView) return;
         const dayData = this._getCurrentDayData();
         const track = this._getCurrentTrackDayData(dayData);
@@ -441,7 +466,7 @@ class TimelineCard extends HTMLElement {
         this._mapView.clearHighlight(segments);
     }
 
-    _handleSegmentClick(segmentIndex) {
+    private _handleSegmentClick(segmentIndex: number): void {
         if (!Number.isInteger(segmentIndex)) return;
         const dayData = this._getCurrentDayData();
         const track = this._getCurrentTrackDayData(dayData);
@@ -462,7 +487,7 @@ class TimelineCard extends HTMLElement {
         }
     }
 
-    _copyStayCoordinatesToClipboard(segment) {
+    private _copyStayCoordinatesToClipboard(segment: StaySegment): void {
         const lat = Number(segment?.center?.lat);
         const lon = Number(segment?.center?.lon);
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
@@ -473,23 +498,23 @@ class TimelineCard extends HTMLElement {
         }
     }
 
-    _extractSegmentPoints(points, segment) {
+    private _extractSegmentPoints(points: GpsPoint[], segment: Segment): GpsPoint[] {
         if (!Array.isArray(points)) return [];
         return points.filter((point) => point.timestamp >= segment.start && point.timestamp <= segment.end);
     }
 
-    _getCurrentDayData() {
+    private _getCurrentDayData(): DayData | undefined {
         return this._cache.get(toDateKey(this._selectedDate));
     }
 
-    _getCurrentTrackDayData(dayData = this._getCurrentDayData()) {
-        const tracks = Array.isArray(dayData?.tracks) ? dayData.tracks : [];
+    private _getCurrentTrackDayData(dayData: DayData | undefined = this._getCurrentDayData()): Track {
+        const tracks = Array.isArray(dayData?.tracks) ? dayData!.tracks! : [];
         const index = Math.min(this._activeEntityIndex, Math.max(0, tracks.length - 1));
         this._activeEntityIndex = index;
         return tracks[index] || {segments: [], points: [], entityId: null, placeEntityId: null};
     }
 
-    _setActiveEntityIndex(index) {
+    private _setActiveEntityIndex(index: number): void {
         const entities = this._getEntities();
         if (!Number.isInteger(index) || index < 0 || index >= entities.length || index === this._activeEntityIndex) {
             return;
@@ -498,7 +523,7 @@ class TimelineCard extends HTMLElement {
         this._render();
     }
 
-    _getEntities() {
+    private _getEntities(): string[] {
         const entities = this._normalizeEntityList(this._config.entity);
         if (!entities.length) {
             throw new Error("You need to define an entity");
@@ -506,13 +531,13 @@ class TimelineCard extends HTMLElement {
         return entities;
     }
 
-    _getPlacesEntityMap() {
+    private _getPlacesEntityMap(): Map<string, string> {
         const placeEntityIds = this._normalizeEntityList(this._config.places_entity);
         const trackedEntities = new Set(this._getEntities());
-        const map = new Map();
+        const map = new Map<string, string>();
 
         placeEntityIds.forEach((placeEntityId) => {
-            const trackerEntityId = this._hass?.states?.[placeEntityId]?.attributes?.devicetracker_entityid;
+            const trackerEntityId = this._hass?.states?.[placeEntityId]?.attributes?.devicetracker_entityid as string | undefined;
             if (!trackerEntityId || !trackedEntities.has(trackerEntityId) || map.has(trackerEntityId)) {
                 return;
             }
@@ -522,10 +547,10 @@ class TimelineCard extends HTMLElement {
         return map;
     }
 
-    _getActivityEntityMap() {
+    private _getActivityEntityMap(): Map<string, string> {
         const activityEntityIds = this._normalizeEntityList(this._config.activity_entity);
         const trackedEntities = this._getEntities();
-        const map = new Map();
+        const map = new Map<string, string>();
 
         if (activityEntityIds.length == trackedEntities.length) {
             trackedEntities.forEach((entityId, index) => {
@@ -536,13 +561,13 @@ class TimelineCard extends HTMLElement {
         return map;
     }
 
-    _normalizeEntityList(value) {
+    private _normalizeEntityList(value: string | string[] | undefined): string[] {
         if (!value) return [];
         const list = Array.isArray(value) ? value : [value];
         return list.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
     }
 
-    _getColors() {
+    private _getColors(): string[] {
         const list = this._config?.colors;
         if (!list) return [];
         const values = Array.isArray(list) ? list : String(list).split(",");
@@ -551,14 +576,14 @@ class TimelineCard extends HTMLElement {
             .filter(Boolean);
     }
 
-    _renderEntitySelector() {
+    private _renderEntitySelector(): string {
         const entities = this._getEntities();
         if (entities.length < 2) return "";
 
         return entities.map((entityId, index) => {
             const state = this._hass?.states?.[entityId];
-            const picture = state?.attributes?.entity_picture;
-            const name = state?.attributes?.friendly_name || entityId;
+            const picture = state?.attributes?.entity_picture as string | undefined;
+            const name = (state?.attributes?.friendly_name as string) || entityId;
             const escapedName = this._escapeHtml(name);
             const escapedPicture = this._escapeHtml(picture || "");
             const trackColor = getTrackColor(index, this._getColors());
@@ -571,7 +596,7 @@ class TimelineCard extends HTMLElement {
         }).join("");
     }
 
-    _escapeHtml(text) {
+    private _escapeHtml(text: string): string {
         return String(text || "")
             .replaceAll("&", "&amp;")
             .replaceAll("<", "&lt;")
@@ -579,7 +604,7 @@ class TimelineCard extends HTMLElement {
             .replaceAll("\"", "&quot;");
     }
 
-    _renderTimelineContent(dayData) {
+    private _renderTimelineContent(dayData: {segments?: Segment[]; error?: string | null; loading?: boolean}): string {
         const errorHtml = dayData.error ? `<div class="error">${dayData.error}</div>` : "";
         const loadingHtml = dayData.loading ? `<div class="loading">Loading timeline...</div>` : "";
         if (dayData.loading || dayData.error) {
@@ -587,7 +612,7 @@ class TimelineCard extends HTMLElement {
         }
 
         try {
-            return renderTimeline(dayData.segments, {
+            return renderTimeline(dayData.segments || [], {
                 locale: this._hass?.locale,
                 distanceUnit: this._config.distance_unit,
             });
@@ -599,14 +624,14 @@ class TimelineCard extends HTMLElement {
         }
     }
 
-    _setCurrentDayError(err) {
+    private _setCurrentDayError(err: unknown): void {
         const key = toDateKey(this._selectedDate);
-        const current = this._cache.get(key) || {loading: false, segments: null, points: null, error: null};
+        const current = this._cache.get(key) || {loading: false, tracks: null, error: null};
         this._cache.set(key, {...current, loading: false, error: this._formatErrorMessage(err)});
     }
 
-    _formatErrorMessage(err) {
-        const message = err && err.message ? String(err.message) : "";
+    private _formatErrorMessage(err: unknown): string {
+        const message = err && (err as Error).message ? String((err as Error).message) : "";
         if (message.toLowerCase().includes("unknown command")) {
             return "History WebSocket API not available. Ensure the Recorder/History integration is enabled.";
         }

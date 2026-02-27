@@ -1,16 +1,31 @@
-import {haversineMeters, toLatLon} from "./utils.js";
+import {haversineMeters, toLatLon} from "./utils";
+import type {GpsPoint, LatLon, MoveSegment, Segment, StaySegment, Zone} from "./types";
 
-export function segmentTimeline(points, options, zones) {
+interface SegmentOptions {
+    stayRadiusM?: number;
+    minStayMinutes?: number;
+}
+
+interface Stay {
+    startIndex: number;
+    endIndex: number;
+    start: Date;
+    end: Date;
+    center: LatLon;
+    radius: number;
+}
+
+export function segmentTimeline(points: GpsPoint[], options: SegmentOptions, zones: Zone[]): Segment[] {
     if (!Array.isArray(points) || points.length === 0) return [];
     const stayRadius = Math.max(10, options.stayRadiusM || 75);
     const minStayMs = Math.max(1, options.minStayMinutes || 10) * 60000;
 
-    const sorted = [...points].sort((a, b) => a.timestamp - b.timestamp);
+    const sorted = [...points].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     const stays = detectStays(sorted, stayRadius, minStayMs);
 
-    const segments = [];
+    const segments: Segment[] = [];
     let cursor = 0;
-    let lastStayEndpoint = null;
+    let lastStayEndpoint: GpsPoint | null = null;
 
     stays.forEach((stay) => {
         if (cursor < stay.startIndex) {
@@ -30,13 +45,13 @@ export function segmentTimeline(points, options, zones) {
     return segments;
 }
 
-function detectStays(points, stayRadius, minStayMs) {
-    const stays = [];
+function detectStays(points: GpsPoint[], stayRadius: number, minStayMs: number): Stay[] {
+    const stays: Stay[] = [];
     let i = 0;
 
     while (i < points.length - 1) {
-        const cluster = [toLatLon(points[i])];
-        let center = toLatLon(points[i])
+        const cluster: LatLon[] = [toLatLon(points[i])];
+        let center = toLatLon(points[i]);
         let lastInIndex = i;
         let outlierUsed = false;
 
@@ -59,7 +74,7 @@ function detectStays(points, stayRadius, minStayMs) {
             break;
         }
 
-        const duration = points[lastInIndex].timestamp - points[i].timestamp;
+        const duration = points[lastInIndex].timestamp.getTime() - points[i].timestamp.getTime();
         if (duration >= minStayMs) {
             const radius = maxDistance(center, cluster);
             const nextPoint = points[lastInIndex + 1];
@@ -80,7 +95,7 @@ function detectStays(points, stayRadius, minStayMs) {
     return stays;
 }
 
-function meanCenter(cluster) {
+function meanCenter(cluster: LatLon[]): LatLon {
     const sum = cluster.reduce(
         (acc, point) => {
             acc.lat += point.lat;
@@ -95,7 +110,7 @@ function meanCenter(cluster) {
     };
 }
 
-function maxDistance(center, cluster) {
+function maxDistance(center: LatLon, cluster: LatLon[]): number {
     let max = 0;
     for (const point of cluster) {
         const distance = haversineMeters(center, point);
@@ -104,13 +119,13 @@ function maxDistance(center, cluster) {
     return max;
 }
 
-function buildStaySegment(stay, zones) {
+function buildStaySegment(stay: Stay, zones: Zone[]): StaySegment {
     const zone = resolveZone(stay.center, zones);
     return {
         type: "stay",
         start: stay.start,
         end: stay.end,
-        durationMs: stay.end - stay.start,
+        durationMs: stay.end.getTime() - stay.start.getTime(),
         center: stay.center,
         radius: stay.radius,
         zoneName: zone ? zone.name : null,
@@ -118,7 +133,7 @@ function buildStaySegment(stay, zones) {
     };
 }
 
-function buildMoveSegment(points, startPoint = null) {
+function buildMoveSegment(points: GpsPoint[], startPoint: GpsPoint | null = null): MoveSegment | null {
     if (!points || points.length < 2) return null;
     let distance = 0;
     if (startPoint) distance += haversineMeters(toLatLon(startPoint), toLatLon(points[0]));
@@ -131,15 +146,15 @@ function buildMoveSegment(points, startPoint = null) {
         type: "move",
         start,
         end,
-        durationMs: end - start,
+        durationMs: end.getTime() - start.getTime(),
         distanceM: distance,
         points: startPoint ? [startPoint, ...points] : points,
     };
 }
 
-function resolveZone(center, zones) {
+function resolveZone(center: LatLon, zones: Zone[]): Zone | null {
     if (!Array.isArray(zones)) return null;
-    let match = null;
+    let match: Zone | null = null;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const zone of zones) {
         const distance = haversineMeters(center, zone);
