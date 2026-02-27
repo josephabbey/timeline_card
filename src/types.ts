@@ -100,7 +100,7 @@ export interface HassState {
 
 export interface HassLike {
     states: Record<string, HassState>;
-    themes?: { darkMode?: boolean; [key: string]: unknown };
+    themes?: {darkMode?: boolean; [key: string]: unknown};
     locale?: HassLocale;
     callWS?: (message: Record<string, unknown>) => Promise<unknown>;
     connection?: {

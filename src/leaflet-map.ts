@@ -93,7 +93,12 @@ export class TimelineLeafletMap {
         return this._isMapZoomedToSegmentValue;
     }
 
-    setDaySegments({tracks = [], activeEntityIndex = 0, onTrackClick = null, colors = []}: SetDaySegmentsOptions): void {
+    setDaySegments({
+        tracks = [],
+        activeEntityIndex = 0,
+        onTrackClick = null,
+        colors = [],
+    }: SetDaySegmentsOptions): void {
         this._fullDayPaths = tracks.map((track, index) => {
             const points: GpsPoint[] = [];
             const segments = Array.isArray(track?.segments) ? track.segments : [];
@@ -138,7 +143,9 @@ export class TimelineLeafletMap {
         if (segment?.type === "stay") {
             this._highlightedStay = segment;
         } else if (segment?.type === "move") {
-            this._highlightedPath = [{points: segment.points, color: "var(--accent-color)", weight: 7, opacity: 1, borderWeight: 10}];
+            this._highlightedPath = [
+                {points: segment.points, color: "var(--accent-color)", weight: 7, opacity: 1, borderWeight: 10},
+            ];
             this._isTravelHighlightActive = true;
         }
 
@@ -176,14 +183,18 @@ export class TimelineLeafletMap {
 
     fitMap({defer = false, bounds = null, pad = 0.1}: FitMapOptions = {}): void {
         if (bounds === null) {
-            const mappedPoints = this._fullDayPath?.points?.map((point) => ({lat: point.point[0], lon: point.point[1]})) || [];
+            const mappedPoints =
+                this._fullDayPath?.points?.map((point) => ({lat: point.point[0], lon: point.point[1]})) || [];
             if (!mappedPoints.length) return;
             bounds = mappedPoints;
         }
 
         const normalizedBounds = bounds
             .map(normalizeLatLng)
-            .filter((point): point is {lat: number; lng: number} => point !== null && Number.isFinite(point.lat) && Number.isFinite(point.lng));
+            .filter(
+                (point): point is {lat: number; lng: number} =>
+                    point !== null && Number.isFinite(point.lat) && Number.isFinite(point.lng),
+            );
         if (!normalizedBounds.length) return;
 
         const paddedBounds = this._Leaflet.latLngBounds(normalizedBounds).pad(pad);
@@ -235,7 +246,9 @@ export class TimelineLeafletMap {
             leafletIconSize: [26, 26] as [number, number],
         });
 
-        this._mapLayers.push(this._Leaflet.marker(toLeafletLatLng(this._highlightedStay.center), {icon, zIndexOffset: 1000}));
+        this._mapLayers.push(
+            this._Leaflet.marker(toLeafletLatLng(this._highlightedStay.center), {icon, zIndexOffset: 1000}),
+        );
     }
 
     private _drawMapLines(): void {
@@ -248,11 +261,13 @@ export class TimelineLeafletMap {
             const latLngs = path.points.map((point) => point.point);
 
             if (path.isActive || path.entityIndex === undefined) {
-                this._mapLayers.push(this._Leaflet.polyline(latLngs, {
-                    color: `color-mix(in srgb, black 30%, ${path.color})`,
-                    opacity: path.opacity ?? 1,
-                    weight: path.borderWeight ?? (path.weight + 3),
-                }));
+                this._mapLayers.push(
+                    this._Leaflet.polyline(latLngs, {
+                        color: `color-mix(in srgb, black 30%, ${path.color})`,
+                        opacity: path.opacity ?? 1,
+                        weight: path.borderWeight ?? path.weight + 3,
+                    }),
+                );
             }
 
             const line = this._Leaflet.polyline(latLngs, {
@@ -279,30 +294,44 @@ interface MarkerIconOptions {
     iconPadding?: string;
 }
 
-const createMarkerIcon = ({iconName, markerSize, iconSize, backgroundColor, borderColor, leafletIconSize, iconPadding = "0"}: MarkerIconOptions): Leaflet.DivIcon => {
+const createMarkerIcon = ({
+    iconName,
+    markerSize,
+    iconSize,
+    backgroundColor,
+    borderColor,
+    leafletIconSize,
+    iconPadding = "0",
+}: MarkerIconOptions): Leaflet.DivIcon => {
     const haIcon = document.createElement("ha-icon");
     haIcon.setAttribute("icon", iconName);
     haIcon.setAttribute("style", `color: white; --mdc-icon-size: ${iconSize}px; padding: ${iconPadding}`);
 
     const iconDiv = document.createElement("div");
     iconDiv.appendChild(haIcon);
-    iconDiv.setAttribute("style", `height: ${markerSize}px; width: ${markerSize}px; background-color: ${backgroundColor}; border-radius: 50%; border: 2px solid ${borderColor}; display: flex;`);
+    iconDiv.setAttribute(
+        "style",
+        `height: ${markerSize}px; width: ${markerSize}px; background-color: ${backgroundColor}; border-radius: 50%; border: 2px solid ${borderColor}; display: flex;`,
+    );
 
     return Leaflet.divIcon({html: iconDiv, className: "my-leaflet-icon", iconSize: leafletIconSize});
 };
 
-const createTileLayer = (leaflet: typeof Leaflet): Leaflet.TileLayer => leaflet.tileLayer(
-    `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}${leaflet.Browser.retina ? "@2x.png" : ".png"}`,
-    {
-        attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: "abcd",
-        minZoom: 0,
-        maxZoom: 20,
-    }
-);
+const createTileLayer = (leaflet: typeof Leaflet): Leaflet.TileLayer =>
+    leaflet.tileLayer(
+        `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}${leaflet.Browser.retina ? "@2x.png" : ".png"}`,
+        {
+            attribution:
+                '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: "abcd",
+            minZoom: 0,
+            maxZoom: 20,
+        },
+    );
 
-const normalizeLatLng = (point: LatLon | [number, number] | Record<string, unknown>): {lat: number; lng: number} | null => {
+const normalizeLatLng = (
+    point: LatLon | [number, number] | Record<string, unknown>,
+): {lat: number; lng: number} | null => {
     if (Array.isArray(point) && point.length >= 2) {
         return {lat: Number(point[0]), lng: Number(point[1])};
     }

@@ -91,7 +91,12 @@ export function haversineMeters(a: LatLon, b: LatLon): number {
     const lat2 = toRad(b.lat);
     const sin1 = Math.sin(dLat / 2);
     const sin2 = Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2), Math.sqrt(1 - (sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2)));
+    const c =
+        2 *
+        Math.atan2(
+            Math.sqrt(sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2),
+            Math.sqrt(1 - (sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2)),
+        );
     return r * c;
 }
 

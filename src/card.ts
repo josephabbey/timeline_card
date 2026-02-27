@@ -79,7 +79,6 @@ class TimelineCard extends HTMLElement {
             }
         });
 
-
         this.shadowRoot!.addEventListener("change", (event) => {
             const target = event.target;
             if (!(target instanceof HTMLInputElement) || target.id !== "timeline-date-picker") return;
@@ -222,34 +221,38 @@ class TimelineCard extends HTMLElement {
             const placesByEntity = this._getPlacesEntityMap();
             const activityByEntity = this._getActivityEntityMap();
             const zones = this._collectZones();
-            const tracks: Track[] = await Promise.all(entities.map(async (entityId) => {
-                const points = await fetchHistory(this._hass!, entityId, date);
-                const placeEntityId = placesByEntity.get(entityId) || null;
-                const placeStates = placeEntityId
-                    ? await fetchEntityHistory(this._hass!, placeEntityId, date)
-                    : [];
-                const activityEntityId = activityByEntity.get(entityId) || null;
-                const activityStates = activityEntityId
-                    ? await fetchEntityHistory(this._hass!, activityEntityId, date)
-                    : [];
-                const segments = segmentTimeline(points, {
-                    stayRadiusM: this._config.stay_radius_m,
-                    minStayMinutes: this._config.min_stay_minutes,
-                }, zones);
-                resolveStaySegments(segments, {
-                    placeStates,
-                    date,
-                    osmApiKey: this._config.osm_api_key,
-                    onUpdate: () => {
-                        const day = this._cache.get(key);
-                        if (!day || !day.tracks) return;
-                        this._render();
-                    },
-                });
-                resolveMoveSegments(segments, activityStates, date);
+            const tracks: Track[] = await Promise.all(
+                entities.map(async (entityId) => {
+                    const points = await fetchHistory(this._hass!, entityId, date);
+                    const placeEntityId = placesByEntity.get(entityId) || null;
+                    const placeStates = placeEntityId ? await fetchEntityHistory(this._hass!, placeEntityId, date) : [];
+                    const activityEntityId = activityByEntity.get(entityId) || null;
+                    const activityStates = activityEntityId
+                        ? await fetchEntityHistory(this._hass!, activityEntityId, date)
+                        : [];
+                    const segments = segmentTimeline(
+                        points,
+                        {
+                            stayRadiusM: this._config.stay_radius_m,
+                            minStayMinutes: this._config.min_stay_minutes,
+                        },
+                        zones,
+                    );
+                    resolveStaySegments(segments, {
+                        placeStates,
+                        date,
+                        osmApiKey: this._config.osm_api_key,
+                        onUpdate: () => {
+                            const day = this._cache.get(key);
+                            if (!day || !day.tracks) return;
+                            this._render();
+                        },
+                    });
+                    resolveMoveSegments(segments, activityStates, date);
 
-                return {entityId, placeEntityId, points, segments};
-            }));
+                    return {entityId, placeEntityId, points, segments};
+                }),
+            );
 
             this._cache.set(key, {
                 loading: false,
@@ -259,7 +262,9 @@ class TimelineCard extends HTMLElement {
         } catch (err) {
             console.warn("Timeline card: history fetch failed", err);
             this._cache.set(key, {
-                loading: false, tracks: null, error: this._formatErrorMessage(err),
+                loading: false,
+                tracks: null,
+                error: this._formatErrorMessage(err),
             });
         }
         this._render();
@@ -271,15 +276,17 @@ class TimelineCard extends HTMLElement {
     private _collectZones(): Zone[] {
         if (!this._hass || !this._hass.states) return [];
         return Object.values(this._hass.states)
-                     .filter((state) => state.entity_id && state.entity_id.startsWith("zone.") && state.attributes?.passive !== true)
-                     .map((state) => ({
-                         name: (state.attributes?.friendly_name as string) || state.entity_id,
-                         icon: (state.attributes?.icon as string) || null,
-                         lat: Number(state.attributes?.latitude),
-                         lon: Number(state.attributes?.longitude),
-                         radius: Number(state.attributes?.radius) || 100,
-                     }))
-                     .filter((zone) => Number.isFinite(zone.lat) && Number.isFinite(zone.lon));
+            .filter(
+                (state) => state.entity_id && state.entity_id.startsWith("zone.") && state.attributes?.passive !== true,
+            )
+            .map((state) => ({
+                name: (state.attributes?.friendly_name as string) || state.entity_id,
+                icon: (state.attributes?.icon as string) || null,
+                lat: Number(state.attributes?.latitude),
+                lon: Number(state.attributes?.longitude),
+                radius: Number(state.attributes?.radius) || 100,
+            }))
+            .filter((zone) => Number.isFinite(zone.lat) && Number.isFinite(zone.lon));
     }
 
     private _render(): void {
@@ -288,7 +295,9 @@ class TimelineCard extends HTMLElement {
 
         const dateKey = toDateKey(this._selectedDate);
         const dayData = this._cache.get(dateKey) || {
-            loading: false, tracks: null, error: null
+            loading: false,
+            tracks: null,
+            error: null,
         };
         const isFuture = this._selectedDate >= startOfDay(new Date());
 
@@ -335,7 +344,11 @@ class TimelineCard extends HTMLElement {
               <div class="header my-header">
                 <div class="header-actions">
                     <ha-icon-button class="nav-button" data-action="prev" label="Previous day"><ha-icon icon="mdi:chevron-left"></ha-icon></ha-icon-button>
-                    ${this._config.debug ? `<ha-icon-button class="nav-button" data-action="debug" label="Debug"><ha-icon icon="mdi:bug"></ha-icon></ha-icon-button>` : ""}
+                    ${
+                        this._config.debug
+                            ? `<ha-icon-button class="nav-button" data-action="debug" label="Debug"><ha-icon icon="mdi:bug"></ha-icon></ha-icon-button>`
+                            : ""
+                    }
                 </div>
                 <div class="date-wrap">
                   <button class="date-trigger" data-action="open-date-picker" type="button" aria-label="Pick date">
@@ -355,7 +368,6 @@ class TimelineCard extends HTMLElement {
           </ha-card>
         `;
     }
-
 
     private _openDatePicker(): void {
         const input = this.shadowRoot?.getElementById("timeline-date-picker") as HTMLInputElement | null;
@@ -378,26 +390,34 @@ class TimelineCard extends HTMLElement {
         if (!body || (body as HTMLElement & {dataset: DOMStringMap}).dataset.swipeBound === "true") return;
         body.dataset.swipeBound = "true";
 
-        body.addEventListener("touchstart", (event) => {
-            const touch = event.changedTouches?.[0];
-            if (!touch) return;
-            this._touchStart = {x: touch.clientX, y: touch.clientY};
-        }, {passive: true});
+        body.addEventListener(
+            "touchstart",
+            (event) => {
+                const touch = event.changedTouches?.[0];
+                if (!touch) return;
+                this._touchStart = {x: touch.clientX, y: touch.clientY};
+            },
+            {passive: true},
+        );
 
-        body.addEventListener("touchend", (event) => {
-            const touch = event.changedTouches?.[0];
-            if (!touch || !this._touchStart) return;
+        body.addEventListener(
+            "touchend",
+            (event) => {
+                const touch = event.changedTouches?.[0];
+                if (!touch || !this._touchStart) return;
 
-            const deltaX = touch.clientX - this._touchStart.x;
-            const deltaY = touch.clientY - this._touchStart.y;
-            this._touchStart = null;
+                const deltaX = touch.clientX - this._touchStart.x;
+                const deltaY = touch.clientY - this._touchStart.y;
+                this._touchStart = null;
 
-            if (Math.abs(deltaX) < 60 || Math.abs(deltaX) < Math.abs(deltaY)) {
-                return;
-            }
+                if (Math.abs(deltaX) < 60 || Math.abs(deltaX) < Math.abs(deltaY)) {
+                    return;
+                }
 
-            this._shiftDate(deltaX > 0 ? -1 : 1);
-        }, {passive: true});
+                this._shiftDate(deltaX > 0 ? -1 : 1);
+            },
+            {passive: true},
+        );
     }
 
     private async _attachMapCard(): Promise<void> {
@@ -537,7 +557,9 @@ class TimelineCard extends HTMLElement {
         const map = new Map<string, string>();
 
         placeEntityIds.forEach((placeEntityId) => {
-            const trackerEntityId = this._hass?.states?.[placeEntityId]?.attributes?.devicetracker_entityid as string | undefined;
+            const trackerEntityId = this._hass?.states?.[placeEntityId]?.attributes?.devicetracker_entityid as
+                | string
+                | undefined;
             if (!trackerEntityId || !trackedEntities.has(trackerEntityId) || map.has(trackerEntityId)) {
                 return;
             }
@@ -571,29 +593,35 @@ class TimelineCard extends HTMLElement {
         const list = this._config?.colors;
         if (!list) return [];
         const values = Array.isArray(list) ? list : String(list).split(",");
-        return values
-            .map((item) => (typeof item === "string" ? item.trim() : ""))
-            .filter(Boolean);
+        return values.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
     }
 
     private _renderEntitySelector(): string {
         const entities = this._getEntities();
         if (entities.length < 2) return "";
 
-        return entities.map((entityId, index) => {
-            const state = this._hass?.states?.[entityId];
-            const picture = state?.attributes?.entity_picture as string | undefined;
-            const name = (state?.attributes?.friendly_name as string) || entityId;
-            const escapedName = this._escapeHtml(name);
-            const escapedPicture = this._escapeHtml(picture || "");
-            const trackColor = getTrackColor(index, this._getColors());
-            return `
-              <button type="button" style="--entity-track-color:${trackColor};" class="entity-chip ${index === this._activeEntityIndex ? "active" : ""}" data-action="select-entity" data-entity-index="${index}">
-                ${picture ? `<img src="${escapedPicture}" alt="${escapedName}">` : "<ha-icon class=\"entity-avatar-icon\" icon=\"mdi:account-circle\"></ha-icon>"}
+        return entities
+            .map((entityId, index) => {
+                const state = this._hass?.states?.[entityId];
+                const picture = state?.attributes?.entity_picture as string | undefined;
+                const name = (state?.attributes?.friendly_name as string) || entityId;
+                const escapedName = this._escapeHtml(name);
+                const escapedPicture = this._escapeHtml(picture || "");
+                const trackColor = getTrackColor(index, this._getColors());
+                return `
+              <button type="button" style="--entity-track-color:${trackColor};" class="entity-chip ${
+                    index === this._activeEntityIndex ? "active" : ""
+                }" data-action="select-entity" data-entity-index="${index}">
+                ${
+                    picture
+                        ? `<img src="${escapedPicture}" alt="${escapedName}">`
+                        : '<ha-icon class="entity-avatar-icon" icon="mdi:account-circle"></ha-icon>'
+                }
                 <span>${escapedName}</span>
               </button>
             `;
-        }).join("");
+            })
+            .join("");
     }
 
     private _escapeHtml(text: string): string {
@@ -601,7 +629,7 @@ class TimelineCard extends HTMLElement {
             .replaceAll("&", "&amp;")
             .replaceAll("<", "&lt;")
             .replaceAll(">", "&gt;")
-            .replaceAll("\"", "&quot;");
+            .replaceAll('"', "&quot;");
     }
 
     private _renderTimelineContent(dayData: {segments?: Segment[]; error?: string | null; loading?: boolean}): string {

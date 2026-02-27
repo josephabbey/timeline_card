@@ -47,7 +47,6 @@ let lastRequestAt = 0;
 let queueSession = 0;
 const persistentCache: Map<string, PersistentCacheEntry> = loadPersistentCache();
 
-
 export function clearReverseGeocodingQueue(): void {
     queueSession += 1;
 
@@ -67,14 +66,12 @@ export function clearReverseGeocodingQueue(): void {
 }
 
 export function resolveStaySegments(segments: Segment[], options: ResolveStayOptions): void {
-    const {
-        placeStates = [],
-        date,
-        osmApiKey = null,
-        onUpdate = () => {},
-    } = options;
+    const {placeStates = [], date, osmApiKey = null, onUpdate = () => {}} = options;
     const placeIntervals = placeStates.length
-        ? buildPlaceIntervals([...placeStates].sort((a, b) => a.ts.getTime() - b.ts.getTime()), date)
+        ? buildPlaceIntervals(
+              [...placeStates].sort((a, b) => a.ts.getTime() - b.ts.getTime()),
+              date,
+          )
         : [];
 
     for (const segment of segments) {
@@ -163,7 +160,10 @@ async function resolveQueuedRequest(request: QueuedRequest, sessionAtStart: numb
         } else {
             result = await response.json();
             const features = ((result as Record<string, unknown>)?.features as Array<Record<string, unknown>>)?.[0];
-            const geocoding = ((features?.properties as Record<string, unknown>)?.geocoding || {}) as Record<string, string>;
+            const geocoding = ((features?.properties as Record<string, unknown>)?.geocoding || {}) as Record<
+                string,
+                string
+            >;
             const houseNumber = geocoding.housenumber ? ` ${geocoding.housenumber}` : "";
             const formatted_address = geocoding.street ? `${geocoding.street}${houseNumber}, ${geocoding.city}` : null;
             const formatted_locality = geocoding.locality ? `${geocoding.locality}, ${geocoding.city}` : null;
@@ -202,16 +202,19 @@ function buildPlaceIntervals(placeStates: NormalizedState[], date: Date): PlaceI
 function placeDisplayName(state: NormalizedState): string | null {
     const attrs = state.attributes || {};
     const street = attrs.street as string | undefined;
-    const streetNumber = (attrs.street_number || '') as string;
+    const streetNumber = (attrs.street_number || "") as string;
     const city = attrs.city as string | undefined;
     const formatted_address = street ? `${street} ${streetNumber}, ${city}` : null;
-    return (attrs.place_name as string) || formatted_address || state.state || (attrs.formatted_address as string) || null;
+    return (
+        (attrs.place_name as string) || formatted_address || state.state || (attrs.formatted_address as string) || null
+    );
 }
 
 function pickPlaceName(intervals: PlaceInterval[], start: Date, end: Date): string | null {
     const counts = new Map<string, number>();
     for (const interval of intervals) {
-        const overlapMs = Math.min(end.getTime(), interval.end.getTime()) - Math.max(start.getTime(), interval.start.getTime());
+        const overlapMs =
+            Math.min(end.getTime(), interval.end.getTime()) - Math.max(start.getTime(), interval.start.getTime());
         if (overlapMs <= 0 || !interval.name) continue;
         counts.set(interval.name, (counts.get(interval.name) || 0) + overlapMs);
     }
@@ -226,7 +229,6 @@ function pickPlaceName(intervals: PlaceInterval[], start: Date, end: Date): stri
     }
     return best;
 }
-
 
 function toPersistentCacheKey(segment: StaySegment): string | null {
     const lat = Number(segment?.center?.lat);

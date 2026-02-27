@@ -102,7 +102,7 @@ function meanCenter(cluster: LatLon[]): LatLon {
             acc.lon += point.lon;
             return acc;
         },
-        {lat: 0, lon: 0}
+        {lat: 0, lon: 0},
     );
     return {
         lat: sum.lat / cluster.length,

@@ -11,7 +11,7 @@ export function resolveMoveSegments(segments: Segment[], activityStates: Normali
 
     const intervals = buildActivityIntervals(
         [...activityStates].sort((a, b) => a.ts.getTime() - b.ts.getTime()),
-        date
+        date,
     );
     if (intervals.length === 0) return;
 
@@ -37,8 +37,10 @@ function buildActivityIntervals(activityStates: NormalizedState[], date: Date): 
 function pickActivityName(intervals: ActivityInterval[], start: Date, end: Date): string | null {
     const counts = new Map<string, number>();
     for (const interval of intervals) {
-        const overlapMs = Math.min(end.getTime(), interval.end.getTime()) - Math.max(start.getTime(), interval.start.getTime());
-        if (overlapMs <= 0 || !interval.name || ["unknown", "unavailable"].includes(interval.name.toLowerCase())) continue;
+        const overlapMs =
+            Math.min(end.getTime(), interval.end.getTime()) - Math.max(start.getTime(), interval.start.getTime());
+        if (overlapMs <= 0 || !interval.name || ["unknown", "unavailable"].includes(interval.name.toLowerCase()))
+            continue;
         counts.set(interval.name, (counts.get(interval.name) || 0) + overlapMs);
     }
 

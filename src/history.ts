@@ -3,9 +3,7 @@ import type {GpsPoint, HassLike, NormalizedState} from "./types";
 
 export async function fetchHistory(hass: HassLike, entityId: string, date: Date): Promise<GpsPoint[]> {
     const states = await fetchEntityHistory(hass, entityId, date);
-    return states
-        .map((state) => toPoint(state))
-        .filter((p): p is GpsPoint => p !== null);
+    return states.map((state) => toPoint(state)).filter((p): p is GpsPoint => p !== null);
 }
 
 export async function fetchEntityHistory(hass: HassLike, entityId: string, date: Date): Promise<NormalizedState[]> {
@@ -41,7 +39,7 @@ function extractEntityStates(response: unknown, entityId: string): Record<string
     if (!response) return [];
     if (!Array.isArray(response) && typeof response === "object") {
         const list = (response as Record<string, unknown>)[entityId];
-        return Array.isArray(list) ? list as Record<string, unknown>[] : [];
+        return Array.isArray(list) ? (list as Record<string, unknown>[]) : [];
     }
     if (!Array.isArray(response)) return [];
     if (response.length === 0) return [];

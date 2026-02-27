@@ -13,21 +13,23 @@ export function renderTimeline(segments: Segment[], options: RenderOptions = {})
 
     const firstIsStay = segments[0]?.type === "stay";
     const lastIsStay = segments[segments.length - 1]?.type === "stay";
-    const timelineClass = [
-        "timeline",
-        firstIsStay ? "trim-spine-top" : "",
-        lastIsStay ? "trim-spine-bottom" : "",
-    ].join(" ");
+    const timelineClass = ["timeline", firstIsStay ? "trim-spine-top" : "", lastIsStay ? "trim-spine-bottom" : ""].join(
+        " ",
+    );
 
     return `
     <div class="${timelineClass}">
       <div class="spine"></div>
-      ${segments.map((segment, index) => renderSegment(segment, index, {
-        locale: options.locale,
-        distanceUnit: options.distanceUnit || "metric",
-        hideStartTime: index === 0 && firstIsStay,
-        hideEndTime: index === segments.length - 1 && lastIsStay,
-    })).join("")}
+      ${segments
+          .map((segment, index) =>
+              renderSegment(segment, index, {
+                  locale: options.locale,
+                  distanceUnit: options.distanceUnit || "metric",
+                  hideStartTime: index === 0 && firstIsStay,
+                  hideEndTime: index === segments.length - 1 && lastIsStay,
+              }),
+          )
+          .join("")}
     </div>
   `;
 }
@@ -67,7 +69,9 @@ function renderSegment(segment: Segment, index: number, options: SegmentRenderOp
       <div class="line-slot"></div>
       <div class="content location travel">
         <ha-icon class="move-icon" icon="mdi:chart-line-variant"></ha-icon>
-        <div class="title">${escapeHtml(capitalizeFirst(segment.activityName || "Moving"))}<span class="meta"> - ${formatDistance(segment.distanceM, options.distanceUnit)}</span></div>
+        <div class="title">${escapeHtml(
+            capitalizeFirst(segment.activityName || "Moving"),
+        )}<span class="meta"> - ${formatDistance(segment.distanceM, options.distanceUnit)}</span></div>
       </div>
       <div class="content time">
         <div class="meta">${formatDuration(segment.durationMs)}</div>
@@ -78,11 +82,7 @@ function renderSegment(segment: Segment, index: number, options: SegmentRenderOp
 
 function escapeHtml(text: string): string {
     if (!text) return "";
-    return text
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll("\"", "&quot;");
+    return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
 function capitalizeFirst(text: string): string {
