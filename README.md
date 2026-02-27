@@ -49,25 +49,26 @@ places_entity:
     - sensor.places_bob
 ```
 
-When multiple entities are configured, the card renders all tracks on the map and adds a selector bar above the date controls. The configured `places_entity` list must either be empty or match the same length/order as `entity`.
+When multiple entities are configured, the card renders all tracks on the map and adds a selector bar above the date controls.
+
+For advanced per-entity configuration (attaching `activity_entity` or `places_entity` to individual entities), see [Advanced Configuration](advanced.md).
 
 ## Configuration options
 
-| Name                     | Type     | Default      | Description                                                                                                                                                         |
-| ------------------------ | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `entity`                 | string[] | **required** | One or more `device_tracker`/`person` entities to pull GPS history from.                                                                                            |
-| **Reverse geocoding**    |          |              | see [Reverse Geocoding](#reverse-geocoding) below                                                                                                                   |
-| `places_entity`          | string[] | `[]`         | Optional `sensor` entity (or list) from Places integration used first for reverse geocoding. Lists must match `entity` order/count when provided.                   |
-| `activity_entity`        | string[] | `[]`         | Optional `sensor` entity (or list) that tracks the current activity (e.g. walking, running). When set, move segments display the activity name instead of "Moving". |
-| `osm_api_key`            | string   | `null`       | Optional OSM Nominatim email address (used as API key) for reverse geocoding fallback.                                                                              |
-| **Detection parameters** |          |              |                                                                                                                                                                     |
-| `stay_radius_m`          | number   | `75`         | Radius (meters) used to detect a stay.                                                                                                                              |
-| `min_stay_minutes`       | number   | `10`         | Minimum duration (minutes) required to qualify as a stay.                                                                                                           |
-| **Map display**          |          |              |                                                                                                                                                                     |
-| `distance_unit`          | string   | `"metric"`   | Distance unit for moving segments: `metric` (`m`, `km`) or `imperial` (`ft`, `mi`).                                                                                 |
-| `map_appearance`         | string   | `"auto"`     | Map appearance: `auto` (align with HA theme), `light`, or `dark`.                                                                                                   |
-| `map_height_px`          | number   | `200`        | Height of the map area in pixels.                                                                                                                                   |
-| `colors`                 | string[] | `[]`         | Optional list of per-entity track colors. When set, these colors are used in order (cycled if needed) instead of HA `--primary-color`/`--color-x` variables.        |
+| Name                     | Type                  | Default      | Description                                                                                                                                                    |
+| ------------------------ | --------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `entity`                 | (string \| object)[]  | **required** | One or more `device_tracker`/`person` entities. Each item can be a string or an [object](advanced.md#entity-object-syntax).                                    |
+| **Reverse geocoding**    |                       |              | see [Reverse Geocoding](#reverse-geocoding) below                                                                                                              |
+| `places_entity`          | string[]              | `[]`         | Optional `sensor` entity (or list) from Places integration. Auto-matched to tracked entities by `devicetracker_entityid` attribute.                            |
+| `osm_api_key`            | string                | `null`       | Optional OSM Nominatim email address (used as API key) for reverse geocoding fallback.                                                                         |
+| **Detection parameters** |                       |              |                                                                                                                                                                |
+| `stay_radius_m`          | number                | `75`         | Radius (meters) used to detect a stay.                                                                                                                         |
+| `min_stay_minutes`       | number                | `10`         | Minimum duration (minutes) required to qualify as a stay.                                                                                                      |
+| **Map display**          |                       |              |                                                                                                                                                                |
+| `distance_unit`          | string                | `"metric"`   | Distance unit for moving segments: `metric` (`m`, `km`) or `imperial` (`ft`, `mi`).                                                                            |
+| `map_appearance`         | string                | `"auto"`     | Map appearance: `auto` (align with HA theme), `light`, or `dark`.                                                                                              |
+| `map_height_px`          | number                | `200`        | Height of the map area in pixels.                                                                                                                              |
+| `colors`                 | string[]              | `[]`         | Optional list of per-entity track colors. When set, these colors are used in order (cycled if needed) instead of HA `--primary-color`/`--color-x` variables.   |
 
 ## Reverse Geocoding
 

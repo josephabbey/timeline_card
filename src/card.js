@@ -12,7 +12,6 @@ import {getConfigFormSchema} from "./config-flow.js";
 const DEFAULT_CONFIG = {
     entity: [],
     places_entity: [],
-    activity_entity: [],
     osm_api_key: null,
     stay_radius_m: 75,
     min_stay_minutes: 10,
@@ -519,18 +518,27 @@ class TimelineCard extends HTMLElement {
     }
 
     _getEntities() {
-        const entities = this._normalizeEntityList(this._config.entity);
-        if (!entities.length) {
+        const entries = this._normalizeEntityEntries();
+        if (!entries.length) {
             throw new Error("You need to define an entity");
         }
-        return entities;
+        return entries.map((entry) => entry.entity);
     }
 
     _getPlacesEntityMap() {
-        const placeEntityIds = this._normalizeEntityList(this._config.places_entity);
-        const trackedEntities = new Set(this._getEntities());
+        const entries = this._normalizeEntityEntries();
         const map = new Map();
 
+        // First: per-entity places_entity from object entries
+        for (const entry of entries) {
+            if (entry.places_entity && !map.has(entry.entity)) {
+                map.set(entry.entity, entry.places_entity);
+            }
+        }
+
+        // Fallback: top-level places_entity auto-matching by devicetracker_entityid
+        const placeEntityIds = this._normalizeStringList(this._config.places_entity);
+        const trackedEntities = new Set(entries.map((e) => e.entity));
         placeEntityIds.forEach((placeEntityId) => {
             const trackerEntityId = this._hass?.states?.[placeEntityId]?.attributes?.devicetracker_entityid;
             if (!trackerEntityId || !trackedEntities.has(trackerEntityId) || map.has(trackerEntityId)) {
@@ -543,20 +551,46 @@ class TimelineCard extends HTMLElement {
     }
 
     _getActivityEntityMap() {
-        const activityEntityIds = this._normalizeEntityList(this._config.activity_entity);
-        const trackedEntities = this._getEntities();
+        const entries = this._normalizeEntityEntries();
         const map = new Map();
 
-        if (activityEntityIds.length == trackedEntities.length) {
-            trackedEntities.forEach((entityId, index) => {
-                map.set(entityId, activityEntityIds[index]);
-            });
+        for (const entry of entries) {
+            if (entry.activity_entity && !map.has(entry.entity)) {
+                map.set(entry.entity, entry.activity_entity);
+            }
         }
 
         return map;
     }
 
-    _normalizeEntityList(value) {
+    _normalizeEntityEntries() {
+        const value = this._config.entity;
+        if (!value) return [];
+        const list = Array.isArray(value) ? value : [value];
+        return list
+            .map((item) => {
+                if (typeof item === "string") {
+                    const trimmed = item.trim();
+                    return trimmed ? {entity: trimmed} : null;
+                }
+                if (item && typeof item === "object" && typeof item.entity === "string") {
+                    const entity = item.entity.trim();
+                    if (!entity) return null;
+                    const entry = {entity};
+                    if (typeof item.activity_entity === "string" && item.activity_entity.trim()) {
+                        entry.activity_entity = item.activity_entity.trim();
+                    }
+                    if (typeof item.places_entity === "string" && item.places_entity.trim()) {
+                        entry.places_entity = item.places_entity.trim();
+                    }
+                    return entry;
+                }
+                return null;
+            })
+            .filter(Boolean);
+    }
+
+    _normalizeStringList(value) {
         if (!value) return [];
         const list = Array.isArray(value) ? value : [value];
         return list.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
@@ -583,8 +617,8 @@ class TimelineCard extends HTMLElement {
                 const trackColor = getTrackColor(index, this._getColors());
                 return `
               <button type="button" style="--entity-track-color:${trackColor};" class="entity-chip ${
-                    index === this._activeEntityIndex ? "active" : ""
-                }" data-action="select-entity" data-entity-index="${index}">
+                  index === this._activeEntityIndex ? "active" : ""
+              }" data-action="select-entity" data-entity-index="${index}">
                 ${
                     picture
                         ? `<img src="${escapedPicture}" alt="${escapedName}">`
