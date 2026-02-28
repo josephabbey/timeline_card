@@ -1,5 +1,21 @@
 # Location Timeline Card (Home Assistant)
+[![Stable][releases-shield]][releases] [![HACS Badge][hacs-badge]][hacs-link] ![Project Maintenance][maintenance-shield] [![GitHub Activity][commits-shield]][commits] [![License][license-shield]](LICENSE.md) [![Community Forum][forum-shield]][forum] [![Reddit][reddit-shield]][reddit]
+
+[commits-shield]: https://img.shields.io/github/commit-activity/y/konewka17/timeline_card.svg
+[commits]: https://github.com/custom-cards/button-card/commits/master
+[forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg
+[forum]: https://community.home-assistant.io/t/location-timeline-card-to-easily-show-location-history/989513
+[reddit-shield]: https://img.shields.io/badge/discussion%20post-reddit-orange.svg
+[reddit]: https://www.reddit.com/r/homeassistant/comments/1rbkxnk/location_timeline_card_to_easily_show_location/
+[license-shield]: https://img.shields.io/github/license/konewka17/timeline_card.svg
+[maintenance-shield]: https://img.shields.io/maintenance/yes/2026.svg
+[releases-shield]: https://img.shields.io/github/release/konewka17/timeline_card.svg
+[releases]: https://github.com/konewka17/timeline_card/releases/latest
+[hacs-badge]: https://img.shields.io/badge/HACS-Default-41BDF5.svg
+[hacs-link]: https://hacs.xyz/
+
 Location Timeline Card is a custom Lovelace card that builds a **timeline–style day view** from your Home Assistant location history. It turns raw GPS points into an easy-to-read daily story of where a person/device stayed and when they moved.
+
 
 ## What this card does
 ![Example](img/card_example.png)
