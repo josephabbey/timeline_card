@@ -1,13 +1,22 @@
 import css from "./card.css";
 import leafletCss from "leaflet/dist/leaflet.css";
-import {fetchEntityHistory, fetchHistory} from "./history.js";
-import {segmentTimeline} from "./segmentation.js";
-import {formatDate, getTrackColor, startOfDay, toDateKey, toLatLon} from "./utils.js";
+import {getSegmentedTracks} from "./segmentation.js";
+import {
+    escapeHtml,
+    formatDate,
+    formatErrorMessage,
+    getTrackColor,
+    isToday,
+    normalizeList,
+    startOfDay,
+    today,
+    toLatLon,
+} from "./utils.js";
 import {TimelineLeafletMap} from "./leaflet-map.js";
-import {clearPersistentCache, clearReverseGeocodingQueue, resolveStaySegments} from "./reverse-geocoding.js";
-import {resolveMoveSegments} from "./activity.js";
+import {clearPersistentCache, clearReverseGeocodingQueue} from "./reverse-geocoding.js";
 import {renderTimeline} from "./timeline.js";
 import {getConfigFormSchema} from "./config-flow.js";
+import {localize} from "./localize/localize.js";
 
 const DEFAULT_CONFIG = {
     entity: [],
@@ -17,7 +26,11 @@ const DEFAULT_CONFIG = {
     min_stay_minutes: 10,
     map_appearance: "auto",
     map_height_px: 200,
+    distance_unit: "metric",
     colors: [],
+    hide_current_location: false,
+    hide_moving: false,
+    collapse_timeline: false,
     debug: false,
 };
 
@@ -32,82 +45,27 @@ class TimelineCard extends HTMLElement {
         this._rendered = false;
         this._touchStart = null;
         this._activeEntityIndex = 0;
-
-        this.shadowRoot.addEventListener("click", (event) => {
-            const target = event.target.closest("[data-action]");
-            if (!target) return;
-            const action = target.dataset.action;
-            if (action === "prev") {
-                this._shiftDate(-1);
-            } else if (action === "next") {
-                this._shiftDate(1);
-            } else if (action === "refresh") {
-                this._refreshCurrentDay();
-            } else if (action === "debug") {
-                this._logCacheToConsole();
-            } else if (action === "open-date-picker") {
-                this._openDatePicker();
-            } else if (action === "reset-map-zoom") {
-                this._resetMapZoom();
-            } else if (action === "select-entity") {
-                this._setActiveEntityIndex(Number(target.dataset.entityIndex));
-            }
-        });
-
-        this.shadowRoot.addEventListener("change", (event) => {
-            const target = event.target;
-            if (!(target instanceof HTMLInputElement) || target.id !== "timeline-date-picker") return;
-            if (!target.value) return;
-            const next = new Date(`${target.value}T00:00:00`);
-            if (!Number.isNaN(next.getTime())) {
-                this._selectedDate = startOfDay(next);
-                this._ensureDay(this._selectedDate).then(() => this._render());
-            }
-        });
-
-        this.shadowRoot.addEventListener("mouseover", (event) => {
-            const entry = event.target.closest("[data-segment-index]");
-            if (!entry || !this.shadowRoot.contains(entry)) return;
-            if (entry.contains(event.relatedTarget)) return;
-            this._handleSegmentHoverStart(Number(entry.dataset.segmentIndex));
-        });
-
-        this.shadowRoot.addEventListener("mouseout", (event) => {
-            const entry = event.target.closest("[data-segment-index]");
-            if (!entry || !this.shadowRoot.contains(entry)) return;
-            if (entry.contains(event.relatedTarget)) return;
-            this._clearHoverHighlight();
-        });
-
-        this.shadowRoot.addEventListener("click", (event) => {
-            const entry = event.target.closest("[data-segment-index]");
-            if (!entry || !this.shadowRoot.contains(entry)) return;
-            if (entry.contains(event.relatedTarget)) return;
-            this._handleSegmentClick(Number(entry.dataset.segmentIndex));
-        });
+        this._timelineCollapsed = false;
+        this._resetMapFitMode();
+        this._addEventListeners();
     }
 
+    // noinspection JSUnusedGlobalSymbols
     setConfig(config) {
-        if (!config || !config.entity) {
-            throw new Error("You need to define an entity");
-        }
         this._config = {...DEFAULT_CONFIG, ...config};
-        if (config.distance_unit === undefined) {
-            this._config.distance_unit = "metric";
-        } else if (config.distance_unit !== "metric" && config.distance_unit !== "imperial") {
-            throw new Error("distance_unit must be either 'metric' or 'imperial'");
-        }
-        this._config.map_appearance = this._config.map_appearance ?? "auto";
-        if (!["auto", "light", "dark"].includes(this._config.map_appearance)) {
-            throw new Error("map_appearance must be one of 'auto', 'light', or 'dark'");
-        }
-        this._activeEntityIndex = 0;
+        this._checkConfig();
+
         this._cache.clear();
         if (this._config.debug) {
             clearPersistentCache();
         }
+
+        this._activeEntityIndex = 0;
+        this._timelineCollapsed = Boolean(this._config.collapse_timeline);
         this._selectedDate = startOfDay(new Date());
-        this._syncMapAppearance();
+        this._resetMapFitMode();
+        this._setDarkMode();
+        this._renderEntitySelector(true);
         this._applyMapHeight();
         if (this._hass) {
             this._ensureDay(this._selectedDate);
@@ -115,11 +73,13 @@ class TimelineCard extends HTMLElement {
         this._render();
     }
 
+    // noinspection JSUnusedGlobalSymbols
     set hass(hass) {
         this._hass = hass;
-        this._syncMapAppearance();
+        this._setDarkMode();
+        this._renderEntitySelector();
         if (!this._config.entity) return;
-        const dateKey = toDateKey(this._selectedDate);
+        const dateKey = formatDate(this._selectedDate);
         if (!this._cache.has(dateKey)) {
             this._ensureDay(this._selectedDate);
         }
@@ -129,11 +89,32 @@ class TimelineCard extends HTMLElement {
         }
     }
 
+    // noinspection JSUnusedGlobalSymbols
     static getConfigForm() {
         return getConfigFormSchema();
     }
 
-    _syncMapAppearance() {
+    // noinspection JSUnusedGlobalSymbols
+    getCardSize() {
+        return 10;
+    }
+
+    _checkConfig() {
+        this._config.entity = normalizeList(this._config.entity);
+        this._config.places_entity = normalizeList(this._config.places_entity);
+        this._config.colors = normalizeList(this._config.colors);
+        if (this._config.entity.length === 0) {
+            throw new Error("You need to define an entity");
+        }
+        if (!["metric", "imperial"].includes(this._config.distance_unit)) {
+            throw new Error("distance_unit must be either 'metric' or 'imperial'");
+        }
+        if (!["auto", "light", "dark"].includes(this._config.map_appearance)) {
+            throw new Error("map_appearance must be one of 'auto', 'light', or 'dark'");
+        }
+    }
+
+    _setDarkMode() {
         let darkMode = Boolean(this._hass?.themes?.darkMode);
         if (this._config.map_appearance === "dark") {
             darkMode = true;
@@ -149,10 +130,7 @@ class TimelineCard extends HTMLElement {
         mapElement.style.setProperty("height", `${this._config.map_height_px}px`, "important");
     }
 
-    getCardSize() {
-        return 6;
-    }
-
+    // Actions
     _shiftDate(direction) {
         clearReverseGeocodingQueue();
 
@@ -164,143 +142,58 @@ class TimelineCard extends HTMLElement {
         const next = new Date(this._selectedDate);
         next.setDate(next.getDate() + direction);
         this._selectedDate = startOfDay(next);
+        this._resetMapFitMode();
         this._ensureDay(this._selectedDate).then(() => this._render());
     }
 
-    _resetMapZoom() {
-        this._mapView?.resetMapZoom();
-        this._updateMapResetButton();
+    _resetMapFitMode() {
+        if (isToday(this._selectedDate) && !this._config.hide_current_location) {
+            this._mapFitMode = "current_location";
+        } else {
+            this._mapFitMode = "selected_entity_path";
+        }
     }
 
     _refreshCurrentDay() {
-        const key = toDateKey(this._selectedDate);
+        const key = formatDate(this._selectedDate);
         this._cache.delete(key);
         this._ensureDay(this._selectedDate).then(() => this._render());
     }
 
     _logCacheToConsole() {
         console.log("%c[Location Timeline Debug]", "color: white; background-color: #03a9f4; font-weight: bold;");
-        console.log(JSON.stringify(this._cache.get(toDateKey(this._selectedDate))));
+        console.log(JSON.stringify(this._cache.get(formatDate(this._selectedDate))));
     }
 
-    async _ensureDay(date) {
-        const key = toDateKey(date);
-        const existing = this._cache.get(key);
-        if (existing && (existing.tracks || existing.loading)) return;
-
-        this._cache.set(key, {loading: true, tracks: null, error: null});
-
-        try {
-            const entities = this._getEntities();
-            const placesByEntity = this._getPlacesEntityMap();
-            const activityByEntity = this._getActivityEntityMap();
-            const zones = this._collectZones();
-            const tracks = await Promise.all(
-                entities.map(async (entityId, index) => {
-                    const points = await fetchHistory(this._hass, entityId, date);
-                    const placeEntityId = placesByEntity.get(entityId) || null;
-                    const placeStates = placeEntityId ? await fetchEntityHistory(this._hass, placeEntityId, date) : [];
-                    const activityEntityId = activityByEntity.get(entityId) || null;
-                    const activityStates = activityEntityId
-                        ? await fetchEntityHistory(this._hass, activityEntityId, date)
-                        : [];
-                    const segments = segmentTimeline(
-                        points,
-                        {
-                            stayRadiusM: this._config.stay_radius_m,
-                            minStayMinutes: this._config.min_stay_minutes,
-                        },
-                        zones,
-                    );
-                    resolveStaySegments(segments, {
-                        placeStates,
-                        date,
-                        osmApiKey: this._config.osm_api_key,
-                        onUpdate: () => {
-                            const day = this._cache.get(key);
-                            if (!day || !day.tracks) return;
-                            this._render();
-                        },
-                    });
-                    resolveMoveSegments(segments, activityStates, date);
-
-                    return {entityId, placeEntityId, points, segments};
-                }),
-            );
-
-            this._cache.set(key, {
-                loading: false,
-                tracks,
-                error: null,
-            });
-        } catch (err) {
-            console.warn("Timeline card: history fetch failed", err);
-            this._cache.set(key, {
-                loading: false,
-                tracks: null,
-                error: this._formatErrorMessage(err),
-            });
-        }
-        this._render();
-        requestAnimationFrame(() => {
-            this._refreshMapPaths();
-        });
-    }
-
-    _collectZones() {
-        if (!this._hass || !this._hass.states) return [];
-        return Object.values(this._hass.states)
-            .filter(
-                (state) => state.entity_id && state.entity_id.startsWith("zone.") && state.attributes?.passive !== true,
-            )
-            .map((state) => ({
-                name: state.attributes?.friendly_name || state.entity_id,
-                icon: state.attributes?.icon || null,
-                lat: Number(state.attributes?.latitude),
-                lon: Number(state.attributes?.longitude),
-                radius: Number(state.attributes?.radius) || 100,
-            }))
-            .filter((zone) => Number.isFinite(zone.lat) && Number.isFinite(zone.lon));
-    }
-
+    // Rendering
     _render() {
         if (!this.shadowRoot) return;
         this._ensureBaseLayout();
 
-        const dateKey = toDateKey(this._selectedDate);
-        const dayData = this._cache.get(dateKey) || {
-            loading: false,
-            tracks: null,
-            error: null,
-        };
-        const isFuture = this._selectedDate >= startOfDay(new Date());
+        const dateKey = formatDate(this._selectedDate);
+        const dayData = this._cache.get(dateKey) || {loading: false, tracks: null, error: null};
 
-        const dateEl = this.shadowRoot.getElementById("timeline-date");
-        dateEl.textContent = formatDate(this._selectedDate);
-
+        this.shadowRoot.getElementById("timeline-date").textContent = formatDate(
+            this._selectedDate,
+            this._hass?.locale,
+        );
         const datePicker = this.shadowRoot.getElementById("timeline-date-picker");
-        datePicker.value = toDateKey(this._selectedDate);
-        datePicker.max = toDateKey(new Date());
+        datePicker.value = formatDate(this._selectedDate);
+        datePicker.max = formatDate(new Date());
 
-        const nextButton = this.shadowRoot.querySelector("[data-action='next']");
-        nextButton.toggleAttribute("disabled", isFuture);
-
+        this.shadowRoot
+            .querySelector("[data-action='next']")
+            .toggleAttribute("disabled", this._selectedDate >= today());
         this._applyMapHeight();
 
-        const body = this.shadowRoot.getElementById("timeline-body");
-        const selector = this.shadowRoot.getElementById("entity-selector");
-        selector.innerHTML = this._renderEntitySelector();
-        selector.toggleAttribute("hidden", this._getEntities().length < 2);
-        this._bindTimelineTouch(body);
-        this._updateMapResetButton();
+        this._updateMapFitButton();
+        this._updateCollapseButtons();
         const activeDayData = this._getCurrentTrackDayData(dayData);
-        body.innerHTML = this._renderTimelineContent(activeDayData);
+        this.shadowRoot.getElementById("timeline-body").innerHTML = this._renderTimelineContent(activeDayData);
 
         this._attachMapCard();
-        requestAnimationFrame(() => {
-            this._refreshMapPaths();
-        });
         this._rendered = true;
+        requestAnimationFrame(() => this._drawMapPaths());
     }
 
     _ensureBaseLayout() {
@@ -313,34 +206,45 @@ class TimelineCard extends HTMLElement {
             <div class="card">
               <div class="map-wrap">
                 <div id="overview-map"></div>
-                <ha-icon-button id="map-reset-zoom" class="map-reset" data-action="reset-map-zoom" label="Reset map zoom" hidden><ha-icon icon="mdi:magnify-expand"></ha-icon></ha-icon-button>
+                <ha-icon-button id="map-fit-mode" class="map-reset" data-action="update-map-fit-mode"><ha-icon></ha-icon></ha-icon-button>
+                <ha-icon-button id="timeline-collapse-map" class="map-reset map-reset-left" data-action="toggle-timeline-collapse" hidden>
+                  <ha-icon></ha-icon>
+                </ha-icon-button>
               </div>
-              <div class="header my-header">
-                <div class="header-actions">
-                    <ha-icon-button class="nav-button" data-action="prev" label="Previous day"><ha-icon icon="mdi:chevron-left"></ha-icon></ha-icon-button>
-                    ${
-                        this._config.debug
-                            ? `<ha-icon-button class="nav-button" data-action="debug" label="Debug"><ha-icon icon="mdi:bug"></ha-icon></ha-icon-button>`
-                            : ""
-                    }
+              <div class="selector-row" id="selector-row" hidden>
+                <ha-icon-button id="timeline-collapse-selector" class="selector-collapse" data-action="toggle-timeline-collapse">
+                  <ha-icon></ha-icon>
+                </ha-icon-button>
+                <div id="entity-selector" class="entity-selector"></div>
+              </div>
+              <div id="timeline-section" class="timeline-section">
+                <div class="timeline-content">
+                <div class="header my-header">
+                  <div class="header-actions">
+                      <ha-icon-button class="nav-button" data-action="prev" label="${localize("card.labels.previous_day")}"><ha-icon icon="mdi:chevron-left"></ha-icon></ha-icon-button>
+                      ${this._config.debug ? `<ha-icon-button class="nav-button" data-action="debug" label="${localize("card.labels.debug")}"><ha-icon icon="mdi:bug"></ha-icon></ha-icon-button>` : ""}
+                  </div>
+                  <div class="date-wrap">
+                    <button class="date-trigger" data-action="open-date-picker" type="button" aria-label="${localize("card.labels.pick_date")}">
+                      <span id="timeline-date" class="date"></span>
+                      <ha-icon class="date-caret" icon="mdi:menu-down"></ha-icon>
+                    </button>
+                    <input id="timeline-date-picker" class="date-picker-input" type="date">
+                  </div>
+                  <div class="header-actions">
+                    <ha-icon-button class="nav-button" data-action="refresh" label="${localize("card.labels.refresh")}"><ha-icon icon="mdi:refresh"></ha-icon></ha-icon-button>
+                    <ha-icon-button class="nav-button" data-action="next" label="${localize("card.labels.next_day")}"><ha-icon icon="mdi:chevron-right"></ha-icon></ha-icon-button>
+                  </div>
                 </div>
-                <div class="date-wrap">
-                  <button class="date-trigger" data-action="open-date-picker" type="button" aria-label="Pick date">
-                    <span id="timeline-date" class="date"></span>
-                    <ha-icon class="date-caret" icon="mdi:menu-down"></ha-icon>
-                  </button>
-                  <input id="timeline-date-picker" class="date-picker-input" type="date">
-                </div>
-                <div class="header-actions">
-                  <ha-icon-button class="nav-button" data-action="refresh" label="Refresh"><ha-icon icon="mdi:refresh"></ha-icon></ha-icon-button>
-                  <ha-icon-button class="nav-button" data-action="next" label="Next day"><ha-icon icon="mdi:chevron-right"></ha-icon></ha-icon-button>
+                <div id="timeline-body" class="body"></div>
                 </div>
               </div>
-              <div id="entity-selector" class="entity-selector" hidden></div>
-              <div id="timeline-body" class="body"></div>
             </div>
           </ha-card>
         `;
+
+        const body = this.shadowRoot.getElementById("timeline-body");
+        this._bindTimelineTouch(body);
     }
 
     _openDatePicker() {
@@ -354,10 +258,341 @@ class TimelineCard extends HTMLElement {
         input.click();
     }
 
-    _updateMapResetButton() {
-        const resetBtn = this.shadowRoot?.getElementById("map-reset-zoom");
-        if (!resetBtn) return;
-        resetBtn.toggleAttribute("hidden", !this._mapView?.isMapZoomedToSegment);
+    _updateMapFitButton() {
+        const fitToggleBtn = this.shadowRoot?.getElementById("map-fit-mode");
+        if (!fitToggleBtn) return;
+        const icon = fitToggleBtn.querySelector("ha-icon");
+
+        if (this._mapFitMode === "segment") {
+            fitToggleBtn.toggleAttribute("hidden", false);
+            icon.setAttribute("icon", "mdi:magnify-scan");
+            fitToggleBtn.setAttribute("label", "Switch to full path fit");
+        } else if (isToday(this._selectedDate) && !this._config.hide_current_location) {
+            fitToggleBtn.toggleAttribute("hidden", false);
+            if (this._mapFitMode === "current_location") {
+                icon.setAttribute("icon", "mdi:magnify-scan");
+                fitToggleBtn.setAttribute("label", "Switch to full path fit");
+            } else {
+                icon.setAttribute("icon", "mdi:crosshairs-gps");
+                fitToggleBtn.setAttribute("label", "Switch to current location fit");
+            }
+        } else {
+            fitToggleBtn.toggleAttribute("hidden", true);
+        }
+    }
+
+    _attachMapCard() {
+        const container = this.shadowRoot.getElementById("overview-map");
+        if (!container || this._mapView || this._isLoadingMap) return;
+        if (!this.isConnected || !container.isConnected) {
+            requestAnimationFrame(() => this._attachMapCard());
+            return;
+        }
+
+        this._isLoadingMap = true;
+        try {
+            this._mapView = new TimelineLeafletMap(container);
+            this._setDarkMode();
+            this._drawMapPaths();
+        } catch (err) {
+            console.warn("Timeline card: map setup failed", err);
+        } finally {
+            this._isLoadingMap = false;
+        }
+    }
+
+    _drawMapPaths() {
+        const dayData = this._getCurrentDayData();
+        if (!dayData || dayData.loading || dayData.error || !this._mapView) return;
+
+        try {
+            const tracks = Array.isArray(dayData.tracks) ? dayData.tracks : [];
+            if (!this._config.hide_current_location) {
+                this._mapView._currentLocations = this._getCurrentEntityLocations();
+            }
+            this._mapView.setDaySegments(
+                tracks,
+                this._activeEntityIndex,
+                (entityIndex) => this._setActiveEntityIndex(entityIndex),
+                this._config.colors,
+            );
+            this._touchStart = null;
+
+            this._updateMapFitButton();
+            this._fitMapToCurrentMode();
+        } catch (err) {
+            this._setCurrentDayError(err);
+            this._render();
+        }
+    }
+
+    _renderEntitySelector(force_rerender = false) {
+        if (!this._baseLayoutReady) return;
+        if (this._entitySelectorRendered && !force_rerender) return;
+        this._entitySelectorRendered = true;
+
+        const entities = this._config.entity;
+        const selector = this.shadowRoot?.getElementById("entity-selector");
+        const selectorRow = this.shadowRoot?.getElementById("selector-row");
+        if (!selector || !selectorRow) return;
+        if (entities.length < 2) {
+            selectorRow.toggleAttribute("hidden", true);
+            return;
+        }
+
+        selectorRow.toggleAttribute("hidden", false);
+        selector.innerHTML = entities
+            .map((entityId, index) => {
+                const state = this._hass?.states?.[entityId];
+                const picture = state?.attributes?.entity_picture;
+                const name = state?.attributes?.friendly_name || entityId;
+                const escapedName = escapeHtml(name);
+                const escapedPicture = escapeHtml(picture || "");
+                const trackColor = getTrackColor(index, this._config?.colors);
+                return `
+              <button type="button" style="--entity-track-color:${trackColor};" class="entity-chip ${index === this._activeEntityIndex ? "active" : ""}" data-action="select-entity" data-entity-index="${index}">
+                ${picture ? `<img src="${escapedPicture}" alt="${escapedName}">` : '<ha-icon class="entity-avatar-icon" icon="mdi:account-circle"></ha-icon>'}
+                <span>${escapedName}</span>
+              </button>
+            `;
+            })
+            .join("");
+        selector.toggleAttribute("hidden", this._config.entity.length < 2);
+        this._updateCollapseButtons();
+    }
+
+    _updateCollapseButtons() {
+        const selectorCollapseBtn = this.shadowRoot?.getElementById("timeline-collapse-selector");
+        const mapCollapseBtn = this.shadowRoot?.getElementById("timeline-collapse-map");
+        const timelineSection = this.shadowRoot?.getElementById("timeline-section");
+        if (!selectorCollapseBtn || !mapCollapseBtn || !timelineSection) return;
+
+        const useSelectorButton = this._config.entity.length > 1;
+        const useMapButton = this._config.entity.length < 2;
+        const icon = this._timelineCollapsed ? "mdi:chevron-down" : "mdi:chevron-up";
+        const label = this._timelineCollapsed ? "Expand timeline" : "Collapse timeline";
+
+        selectorCollapseBtn.toggleAttribute("hidden", !useSelectorButton);
+        mapCollapseBtn.toggleAttribute("hidden", !useMapButton);
+
+        selectorCollapseBtn.querySelector("ha-icon")?.setAttribute("icon", icon);
+        mapCollapseBtn.querySelector("ha-icon")?.setAttribute("icon", icon);
+        selectorCollapseBtn.setAttribute("label", label);
+        mapCollapseBtn.setAttribute("label", label);
+
+        timelineSection.classList.toggle("collapsed", this._timelineCollapsed);
+    }
+
+    _renderTimelineContent(dayData) {
+        if (dayData.loading || dayData.error) {
+            const errorHtml = dayData.error ? `<div class="error">${dayData.error}</div>` : "";
+            const loadingHtml = dayData.loading
+                ? `<div class="loading">${localize("card.timeline.loading")}</div>`
+                : "";
+            return `${errorHtml}${loadingHtml}`;
+        }
+
+        try {
+            return renderTimeline(dayData.segments, this._hass?.locale, this._config);
+        } catch (err) {
+            const message = formatErrorMessage(err);
+            console.warn("Timeline card: timeline render failed", err);
+            this._setCurrentDayError(err);
+            return `<div class="error">${message}</div>`;
+        }
+    }
+
+    // Functions
+    async _ensureDay(date) {
+        const key = formatDate(date);
+        const existing = this._cache.get(key);
+        if (existing && (existing.tracks || existing.loading)) return;
+
+        this._cache.set(key, {loading: true, tracks: null, error: null});
+
+        try {
+            const tracks = await getSegmentedTracks(date, this._config, this._hass, () => {
+                this._render();
+            });
+            this._cache.set(key, {loading: false, tracks, error: null});
+        } catch (err) {
+            console.warn("Timeline card: history fetch failed", err);
+            this._cache.set(key, {loading: false, tracks: null, error: formatErrorMessage(err)});
+        }
+        this._render();
+        requestAnimationFrame(() => this._drawMapPaths());
+    }
+
+    _getCurrentDayData() {
+        return this._cache.get(formatDate(this._selectedDate));
+    }
+
+    _getCurrentTrackDayData(dayData = this._getCurrentDayData()) {
+        const tracks = Array.isArray(dayData?.tracks) ? dayData.tracks : [];
+        const index = Math.min(this._activeEntityIndex, Math.max(0, tracks.length - 1));
+        this._activeEntityIndex = index;
+        return tracks[index] || {segments: [], points: [], entityId: null, placeEntityId: null};
+    }
+
+    _setActiveEntityIndex(index) {
+        if (
+            !Number.isInteger(index) ||
+            index < 0 ||
+            index >= this._config.entity.length ||
+            index === this._activeEntityIndex
+        ) {
+            return;
+        }
+        this._activeEntityIndex = index;
+        this._renderEntitySelector(true);
+        this._render();
+    }
+
+    _fitMapToCurrentMode() {
+        let bounds = null;
+        if (isToday(this._selectedDate) && this._mapFitMode === "current_location") {
+            bounds = this._getCurrentEntityLocations().map((point) => point.point);
+        }
+        this._mapView.fitMap(bounds);
+    }
+
+    _updateMapFitMode() {
+        if (this._mapFitMode === "current_location") {
+            this._mapFitMode = "selected_entity_path";
+        } else {
+            this._resetMapFitMode();
+        }
+        this._updateMapFitButton();
+        this._fitMapToCurrentMode();
+    }
+
+    _getCurrentEntityLocations() {
+        if (!isToday(this._selectedDate)) {
+            return [];
+        }
+
+        return this._config.entity
+            .map((entityId, index) => {
+                const state = this._hass?.states?.[entityId];
+                const lat = Number(state?.attributes?.latitude);
+                const lon = Number(state?.attributes?.longitude);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+                return {
+                    point: [lat, lon],
+                    picture: state?.attributes?.entity_picture || null,
+                    name: state?.attributes?.friendly_name || entityId,
+                    color: getTrackColor(index, this._config?.colors),
+                    isActive: index === this._activeEntityIndex,
+                };
+            })
+            .filter(Boolean);
+    }
+
+    _setCurrentDayError(err) {
+        const key = formatDate(this._selectedDate);
+        const current = this._cache.get(key) || {loading: false, segments: null, points: null, error: null};
+        this._cache.set(key, {...current, loading: false, error: formatErrorMessage(err)});
+    }
+
+    // Event listeners
+    _addEventListeners() {
+        this.shadowRoot.addEventListener("click", (event) => {
+            const target = event.target.closest("[data-action]");
+            if (!target) return;
+            const action = target.dataset.action;
+            if (action === "prev") {
+                this._shiftDate(-1);
+            } else if (action === "next") {
+                this._shiftDate(1);
+            } else if (action === "refresh") {
+                this._refreshCurrentDay();
+            } else if (action === "update-map-fit-mode") {
+                this._updateMapFitMode();
+            } else if (action === "debug") {
+                this._logCacheToConsole();
+            } else if (action === "open-date-picker") {
+                this._openDatePicker();
+            } else if (action === "select-entity") {
+                this._setActiveEntityIndex(Number(target.dataset.entityIndex));
+            } else if (action === "toggle-timeline-collapse") {
+                this._timelineCollapsed = !this._timelineCollapsed;
+                this._updateCollapseButtons();
+            }
+        });
+
+        this.shadowRoot.addEventListener("change", (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement) || target.id !== "timeline-date-picker" || !target.value) return;
+            const next = new Date(`${target.value}T00:00:00`);
+            if (!Number.isNaN(next.getTime())) {
+                this._selectedDate = startOfDay(next);
+                this._resetMapFitMode();
+                this._ensureDay(this._selectedDate).then(() => this._render());
+            }
+        });
+
+        this.shadowRoot.addEventListener("mouseover", (e) =>
+            this._onSegmentEvent(e, (idx) => this._handleSegmentHoverStart(idx)),
+        );
+        this.shadowRoot.addEventListener("mouseout", (e) =>
+            this._onSegmentEvent(e, (idx) => this._clearHoverHighlight(idx)),
+        );
+        this.shadowRoot.addEventListener("click", (e) =>
+            this._onSegmentEvent(e, (idx) => this._handleSegmentClick(idx)),
+        );
+    }
+
+    _onSegmentEvent(e, callback) {
+        const entry = e.target.closest("[data-segment-index]");
+        if (!entry || !this.shadowRoot.contains(entry)) return;
+        if (entry.contains(e.relatedTarget)) return;
+        callback(Number(entry.dataset.segmentIndex));
+    }
+
+    _handleSegmentHoverStart(segmentIndex) {
+        if (!Number.isInteger(segmentIndex)) return;
+        const dayData = this._getCurrentDayData();
+        const track = this._getCurrentTrackDayData(dayData);
+        if (!track || !Array.isArray(track.segments)) return;
+
+        const segment = track.segments[segmentIndex];
+        if (!segment || !this._mapView) return;
+
+        const segments = Array.isArray(track.segments) ? track.segments : [];
+        this._touchStart = null;
+        this._mapView.highlightSegment(segment, segments);
+    }
+
+    _clearHoverHighlight() {
+        if (!this._mapView) return;
+        const dayData = this._getCurrentDayData();
+        const track = this._getCurrentTrackDayData(dayData);
+        const segments = Array.isArray(track?.segments) ? track.segments : [];
+        this._touchStart = null;
+        this._mapView.clearHighlight(segments);
+    }
+
+    _handleSegmentClick(segmentIndex) {
+        if (!Number.isInteger(segmentIndex)) return;
+        const dayData = this._getCurrentDayData();
+        const track = this._getCurrentTrackDayData(dayData);
+        if (!track || !Array.isArray(track.segments)) return;
+
+        const segment = track.segments[segmentIndex];
+        if (!segment) return;
+
+        this._mapFitMode = "segment";
+        this._updateMapFitButton();
+        if (segment.type === "stay") {
+            this._mapView?.fitMap([segment.center]);
+        } else if (segment.type === "move") {
+            const segmentPoints = track.points.filter(
+                (point) => point.timestamp >= segment.start && point.timestamp <= segment.end,
+            );
+            if (segmentPoints.length < 2) return;
+            this._mapView?.fitMap(segmentPoints.map(toLatLon));
+        }
     }
 
     _bindTimelineTouch(body) {
@@ -393,285 +628,6 @@ class TimelineCard extends HTMLElement {
             {passive: true},
         );
     }
-
-    async _attachMapCard() {
-        const container = this.shadowRoot.getElementById("overview-map");
-        if (!container || this._mapView || this._isLoadingMap) return;
-        if (!this.isConnected || !container.isConnected) {
-            requestAnimationFrame(() => this._attachMapCard());
-            return;
-        }
-
-        this._isLoadingMap = true;
-        try {
-            this._mapView = new TimelineLeafletMap(container);
-            this._syncMapAppearance();
-            this._refreshMapPaths();
-            this._mapView.fitMap({defer: true});
-        } catch (err) {
-            console.warn("Timeline card: map setup failed", err);
-        } finally {
-            this._isLoadingMap = false;
-        }
-    }
-
-    _refreshMapPaths() {
-        const dayData = this._getCurrentDayData();
-        if (!dayData || dayData.loading || dayData.error || !this._mapView) return;
-
-        try {
-            const tracks = Array.isArray(dayData.tracks) ? dayData.tracks : [];
-            this._mapView.setDaySegments({
-                tracks,
-                activeEntityIndex: this._activeEntityIndex,
-                onTrackClick: (entityIndex) => this._setActiveEntityIndex(entityIndex),
-                colors: this._getColors(),
-            });
-            this._touchStart = null;
-
-            this._updateMapResetButton();
-            this._mapView.fitMap();
-        } catch (err) {
-            this._setCurrentDayError(err);
-            this._render();
-        }
-    }
-
-    _handleSegmentHoverStart(segmentIndex) {
-        if (!Number.isInteger(segmentIndex)) return;
-        const dayData = this._getCurrentDayData();
-        const track = this._getCurrentTrackDayData(dayData);
-        if (!track || !Array.isArray(track.segments)) return;
-
-        const segment = track.segments[segmentIndex];
-        if (!segment || !this._mapView) return;
-
-        const segments = Array.isArray(track.segments) ? track.segments : [];
-        this._touchStart = null;
-        this._mapView.highlightSegment(segment, segments);
-    }
-
-    _clearHoverHighlight() {
-        if (!this._mapView) return;
-        const dayData = this._getCurrentDayData();
-        const track = this._getCurrentTrackDayData(dayData);
-        const segments = Array.isArray(track?.segments) ? track.segments : [];
-        this._touchStart = null;
-        this._mapView.clearHighlight(segments);
-    }
-
-    _handleSegmentClick(segmentIndex) {
-        if (!Number.isInteger(segmentIndex)) return;
-        const dayData = this._getCurrentDayData();
-        const track = this._getCurrentTrackDayData(dayData);
-        if (!track || !Array.isArray(track.segments)) return;
-
-        const segment = track.segments[segmentIndex];
-        if (!segment) return;
-
-        if (segment.type === "stay") {
-            this._copyStayCoordinatesToClipboard(segment);
-            this._mapView?.zoomToStay(segment);
-            this._updateMapResetButton();
-        } else if (segment.type === "move") {
-            const segmentPoints = this._extractSegmentPoints(track.points, segment);
-            if (segmentPoints.length < 2) return;
-            this._mapView?.zoomToPoints(segmentPoints.map(toLatLon));
-            this._updateMapResetButton();
-        }
-    }
-
-    _copyStayCoordinatesToClipboard(segment) {
-        const lat = Number(segment?.center?.lat);
-        const lon = Number(segment?.center?.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-        const value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
-
-        if (navigator?.clipboard?.writeText) {
-            navigator.clipboard.writeText(value).catch(() => {});
-        }
-    }
-
-    _extractSegmentPoints(points, segment) {
-        if (!Array.isArray(points)) return [];
-        return points.filter((point) => point.timestamp >= segment.start && point.timestamp <= segment.end);
-    }
-
-    _getCurrentDayData() {
-        return this._cache.get(toDateKey(this._selectedDate));
-    }
-
-    _getCurrentTrackDayData(dayData = this._getCurrentDayData()) {
-        const tracks = Array.isArray(dayData?.tracks) ? dayData.tracks : [];
-        const index = Math.min(this._activeEntityIndex, Math.max(0, tracks.length - 1));
-        this._activeEntityIndex = index;
-        return tracks[index] || {segments: [], points: [], entityId: null, placeEntityId: null};
-    }
-
-    _setActiveEntityIndex(index) {
-        const entities = this._getEntities();
-        if (!Number.isInteger(index) || index < 0 || index >= entities.length || index === this._activeEntityIndex) {
-            return;
-        }
-        this._activeEntityIndex = index;
-        this._render();
-    }
-
-    _getEntities() {
-        const entries = this._normalizeEntityEntries();
-        if (!entries.length) {
-            throw new Error("You need to define an entity");
-        }
-        return entries.map((entry) => entry.entity);
-    }
-
-    _getPlacesEntityMap() {
-        const entries = this._normalizeEntityEntries();
-        const map = new Map();
-
-        // First: per-entity places_entity from object entries
-        for (const entry of entries) {
-            if (entry.places_entity && !map.has(entry.entity)) {
-                map.set(entry.entity, entry.places_entity);
-            }
-        }
-
-        // Fallback: top-level places_entity auto-matching by devicetracker_entityid
-        const placeEntityIds = this._normalizeStringList(this._config.places_entity);
-        const trackedEntities = new Set(entries.map((e) => e.entity));
-        placeEntityIds.forEach((placeEntityId) => {
-            const trackerEntityId = this._hass?.states?.[placeEntityId]?.attributes?.devicetracker_entityid;
-            if (!trackerEntityId || !trackedEntities.has(trackerEntityId) || map.has(trackerEntityId)) {
-                return;
-            }
-            map.set(trackerEntityId, placeEntityId);
-        });
-
-        return map;
-    }
-
-    _getActivityEntityMap() {
-        const entries = this._normalizeEntityEntries();
-        const map = new Map();
-
-        for (const entry of entries) {
-            if (entry.activity_entity && !map.has(entry.entity)) {
-                map.set(entry.entity, entry.activity_entity);
-            }
-        }
-
-        return map;
-    }
-
-    _normalizeEntityEntries() {
-        const value = this._config.entity;
-        if (!value) return [];
-        const list = Array.isArray(value) ? value : [value];
-        return list
-            .map((item) => {
-                if (typeof item === "string") {
-                    const trimmed = item.trim();
-                    return trimmed ? {entity: trimmed} : null;
-                }
-                if (item && typeof item === "object" && typeof item.entity === "string") {
-                    const entity = item.entity.trim();
-                    if (!entity) return null;
-                    const entry = {entity};
-                    if (typeof item.activity_entity === "string" && item.activity_entity.trim()) {
-                        entry.activity_entity = item.activity_entity.trim();
-                    }
-                    if (typeof item.places_entity === "string" && item.places_entity.trim()) {
-                        entry.places_entity = item.places_entity.trim();
-                    }
-                    return entry;
-                }
-                return null;
-            })
-            .filter(Boolean);
-    }
-
-    _normalizeStringList(value) {
-        if (!value) return [];
-        const list = Array.isArray(value) ? value : [value];
-        return list.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
-    }
-
-    _getColors() {
-        const list = this._config?.colors;
-        if (!list) return [];
-        const values = Array.isArray(list) ? list : String(list).split(",");
-        return values.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
-    }
-
-    _renderEntitySelector() {
-        const entities = this._getEntities();
-        if (entities.length < 2) return "";
-
-        return entities
-            .map((entityId, index) => {
-                const state = this._hass?.states?.[entityId];
-                const picture = state?.attributes?.entity_picture;
-                const name = state?.attributes?.friendly_name || entityId;
-                const escapedName = this._escapeHtml(name);
-                const escapedPicture = this._escapeHtml(picture || "");
-                const trackColor = getTrackColor(index, this._getColors());
-                return `
-              <button type="button" style="--entity-track-color:${trackColor};" class="entity-chip ${
-                  index === this._activeEntityIndex ? "active" : ""
-              }" data-action="select-entity" data-entity-index="${index}">
-                ${
-                    picture
-                        ? `<img src="${escapedPicture}" alt="${escapedName}">`
-                        : '<ha-icon class="entity-avatar-icon" icon="mdi:account-circle"></ha-icon>'
-                }
-                <span>${escapedName}</span>
-              </button>
-            `;
-            })
-            .join("");
-    }
-
-    _escapeHtml(text) {
-        return String(text || "")
-            .replaceAll("&", "&amp;")
-            .replaceAll("<", "&lt;")
-            .replaceAll(">", "&gt;")
-            .replaceAll('"', "&quot;");
-    }
-
-    _renderTimelineContent(dayData) {
-        const errorHtml = dayData.error ? `<div class="error">${dayData.error}</div>` : "";
-        const loadingHtml = dayData.loading ? `<div class="loading">Loading timeline...</div>` : "";
-        if (dayData.loading || dayData.error) {
-            return `${errorHtml}${loadingHtml}`;
-        }
-
-        try {
-            return renderTimeline(dayData.segments, {
-                locale: this._hass?.locale,
-                distanceUnit: this._config.distance_unit,
-            });
-        } catch (err) {
-            const message = this._formatErrorMessage(err);
-            console.warn("Timeline card: timeline render failed", err);
-            this._setCurrentDayError(err);
-            return `<div class="error">${message}</div>`;
-        }
-    }
-
-    _setCurrentDayError(err) {
-        const key = toDateKey(this._selectedDate);
-        const current = this._cache.get(key) || {loading: false, segments: null, points: null, error: null};
-        this._cache.set(key, {...current, loading: false, error: this._formatErrorMessage(err)});
-    }
-
-    _formatErrorMessage(err) {
-        const message = err && err.message ? String(err.message) : "";
-        if (message.toLowerCase().includes("unknown command")) {
-            return "History WebSocket API not available. Ensure the Recorder/History integration is enabled.";
-        }
-        return message || "Unable to load history";
-    }
 }
 
 customElements.define("location-timeline-card", TimelineCard);
@@ -680,5 +636,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
     type: "location-timeline-card",
     name: "Location Timeline Card",
-    description: "Daily location timeline from GPS history.",
+    description: localize("card.description"),
 });

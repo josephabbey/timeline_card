@@ -1,3 +1,5 @@
+import {sleep} from "./utils.js";
+
 const UNKNOWN_LOCATION = "Unknown location";
 const LOADING_LOCATION = "Loading address...";
 const PERSISTENT_CACHE_KEY = "location_timeline_reverse_geocode_cache_v1";
@@ -32,19 +34,13 @@ export function clearReverseGeocodingQueue() {
     }
 }
 
-export function resolveStaySegments(segments, options) {
-    const {placeStates = [], date, osmApiKey = null, onUpdate = () => {}} = options;
-    const placeIntervals = placeStates.length
-        ? buildPlaceIntervals(
-              [...placeStates].sort((a, b) => a.ts - b.ts),
-              date,
-          )
-        : [];
-
+export function resolveStaySegments(segments, placeStates, date, osmApiKey, onUpdate) {
+    const placeIntervals = buildPlaceIntervals(placeStates, date);
     for (const segment of segments) {
         if (segment.type !== "stay" || segment.zoneName) continue;
         if (segment.placeName && segment.placeName !== LOADING_LOCATION) continue;
 
+        // Load from persistent cache
         const segmentKey = toPersistentCacheKey(segment);
         const cached = persistentCache.get(segmentKey);
         if (cached) {
@@ -53,6 +49,7 @@ export function resolveStaySegments(segments, options) {
             continue;
         }
 
+        // Load from `places`
         const placeName = pickPlaceName(placeIntervals, segment.start, segment.end);
         if (placeName) {
             segment.placeName = placeName;
@@ -61,16 +58,17 @@ export function resolveStaySegments(segments, options) {
             continue;
         }
 
-        if (!osmApiKey) {
-            segment.placeName = UNKNOWN_LOCATION;
+        // Load from OSM Nominatim API
+        if (osmApiKey) {
+            segment.placeName = LOADING_LOCATION;
             segment.reverseGeocoding = null;
-            setPersistentCache(segmentKey, segment.placeName, segment.reverseGeocoding);
+            enqueueReverseLookup(segment, segmentKey, osmApiKey, onUpdate);
             continue;
         }
 
-        segment.placeName = LOADING_LOCATION;
+        segment.placeName = UNKNOWN_LOCATION;
         segment.reverseGeocoding = null;
-        enqueueReverseLookup(segment, segmentKey, osmApiKey, onUpdate);
+        setPersistentCache(segmentKey, segment.placeName, segment.reverseGeocoding);
     }
 }
 
@@ -150,10 +148,10 @@ function buildPlaceIntervals(placeStates, date) {
     const endOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
     return placeStates.map((state, index) => {
         const next = placeStates[index + 1];
-        const end = next ? next.ts : endOfDay;
+        const end = next ? new Date(next.lu * 1000) : endOfDay;
         const name = placeDisplayName(state);
         return {
-            start: state.ts,
+            start: new Date(state.lu * 1000),
             end,
             name,
         };
@@ -223,8 +221,4 @@ function setPersistentCache(key, placeName, reverseGeocoding) {
 
 export function clearPersistentCache() {
     localStorage.removeItem(PERSISTENT_CACHE_KEY);
-}
-
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }

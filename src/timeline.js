@@ -1,24 +1,24 @@
-import {capitalizeFirst, formatDistance, formatDuration, formatTimeRange} from "./utils.js";
+import {capitalizeFirst, escapeHtml, formatDistance, formatDuration, formatTimeRange} from "./utils.js";
+import {localize} from "./localize/localize.js";
 
-export function renderTimeline(segments, options = {}) {
+export function renderTimeline(segments, locale, config) {
     if (!segments || segments.length === 0) {
-        return `<div class="empty">No location history for this day.</div>`;
+        return `<div class="empty">${localize("timeline.empty")}</div>`;
     }
 
     const firstIsStay = segments[0]?.type === "stay";
     const lastIsStay = segments[segments.length - 1]?.type === "stay";
-    const timelineClass = ["timeline", firstIsStay ? "trim-spine-top" : "", lastIsStay ? "trim-spine-bottom" : ""].join(
-        " ",
-    );
+    const timelineClass = ["timeline", firstIsStay ? "trim-spine-top" : "", lastIsStay ? "trim-spine-bottom" : ""];
 
     return `
-    <div class="${timelineClass}">
+    <div class="${timelineClass.join(" ")}">
       <div class="spine"></div>
       ${segments
           .map((segment, index) =>
               renderSegment(segment, index, {
-                  locale: options.locale,
-                  distanceUnit: options.distanceUnit || "metric",
+                  locale: locale,
+                  distanceUnit: config.distance_unit || "metric",
+                  hideMoving: Boolean(config.hide_moving),
                   hideStartTime: index === 0 && firstIsStay,
                   hideEndTime: index === segments.length - 1 && lastIsStay,
               }),
@@ -41,7 +41,7 @@ function renderSegment(segment, index, options) {
               <div class="line-dot"></div>
             </div>
             <div class="content location">
-              <div class="title">${escapeHtml(segment.zoneName || segment.placeName || "Unknown location")}</div>
+              <div class="title">${escapeHtml(segment.zoneName || segment.placeName || localize("timeline.unknown_location"))}</div>
             </div>
             <div class="content time">
               <div class="meta">${formatTimeRange(segment.start, segment.end, options)}</div>
@@ -50,24 +50,22 @@ function renderSegment(segment, index, options) {
         `;
     }
 
-    return `
-    <div class="entry move" data-segment-index="${index}" data-segment-type="move">
-      <div class="left-icon"></div>
-      <div class="line-slot"></div>
-      <div class="content location travel">
-        <ha-icon class="move-icon" icon="mdi:chart-line-variant"></ha-icon>
-        <div class="title">${escapeHtml(
-            capitalizeFirst(segment.activityName || "Moving"),
-        )}<span class="meta"> - ${formatDistance(segment.distanceM, options.distanceUnit)}</span></div>
-      </div>
-      <div class="content time">
-        <div class="meta">${formatDuration(segment.durationMs)}</div>
-      </div>
-    </div>
-  `;
-}
-
-function escapeHtml(text) {
-    if (!text) return "";
-    return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+    if (!options.hideMoving) {
+        return `
+          <div class="entry move" data-segment-index="${index}" data-segment-type="move">
+            <div class="left-icon"></div>
+            <div class="line-slot" data-segment-index="${index}">
+              <div class="spine-overlay"></div>
+            </div>
+            <div class="content location travel">
+              <ha-icon class="move-icon" icon="mdi:chart-line-variant"></ha-icon>
+              <div class="title">${escapeHtml(capitalizeFirst(segment.activityName || localize("timeline.moving")))}<span class="meta"> - ${formatDistance(segment.distanceM, options.distanceUnit)}</span></div>
+            </div>
+            <div class="content time">
+              <div class="meta">${formatDuration(segment.durationMs)}</div>
+            </div>
+          </div>
+        `;
+    }
+    return "";
 }
