@@ -7,6 +7,7 @@ import {
     formatErrorMessage,
     getTrackColor,
     isToday,
+    normalizeEntityEntries,
     normalizeList,
     startOfDay,
     today,
@@ -32,6 +33,7 @@ const DEFAULT_CONFIG = {
     hide_moving: false,
     collapse_timeline: false,
     debug: false,
+    activity_icon_map: {},
 };
 
 class TimelineCard extends HTMLElement {
@@ -87,6 +89,7 @@ class TimelineCard extends HTMLElement {
             this._render();
             this._rendered = true;
         }
+        this._config.entity = normalizeEntityEntries(this._config, this._hass);
     }
 
     // noinspection JSUnusedGlobalSymbols
@@ -100,7 +103,7 @@ class TimelineCard extends HTMLElement {
     }
 
     _checkConfig() {
-        this._config.entity = normalizeList(this._config.entity);
+        this._config.entity = normalizeEntityEntries(this._config);
         this._config.places_entity = normalizeList(this._config.places_entity);
         this._config.colors = normalizeList(this._config.colors);
         if (this._config.entity.length === 0) {
@@ -171,7 +174,11 @@ class TimelineCard extends HTMLElement {
         this._ensureBaseLayout();
 
         const dateKey = formatDate(this._selectedDate);
-        const dayData = this._cache.get(dateKey) || {loading: false, tracks: null, error: null};
+        const dayData = this._cache.get(dateKey) || {
+            loading: false,
+            tracks: null,
+            error: null,
+        };
 
         this.shadowRoot.getElementById("timeline-date").textContent = formatDate(
             this._selectedDate,
@@ -315,6 +322,7 @@ class TimelineCard extends HTMLElement {
                 this._activeEntityIndex,
                 (entityIndex) => this._setActiveEntityIndex(entityIndex),
                 this._config.colors,
+                this._config.activity_icon_map,
             );
             this._touchStart = null;
 
@@ -342,13 +350,14 @@ class TimelineCard extends HTMLElement {
 
         selectorRow.toggleAttribute("hidden", false);
         selector.innerHTML = entities
-            .map((entityId, index) => {
+            .map(({entity: entityId}, index) => {
                 const state = this._hass?.states?.[entityId];
                 const picture = state?.attributes?.entity_picture;
                 const name = state?.attributes?.friendly_name || entityId;
                 const escapedName = escapeHtml(name);
                 const escapedPicture = escapeHtml(picture || "");
-                const trackColor = getTrackColor(index, this._config?.colors);
+                const entityDef = this._config.entity[index];
+                const trackColor = getTrackColor(index, this._config?.colors, entityDef?.color);
                 return `
               <button type="button" style="--entity-track-color:${trackColor};" class="entity-chip ${index === this._activeEntityIndex ? "active" : ""}" data-action="select-entity" data-entity-index="${index}">
                 ${picture ? `<img src="${escapedPicture}" alt="${escapedName}">` : '<ha-icon class="entity-avatar-icon" icon="mdi:account-circle"></ha-icon>'}
@@ -417,7 +426,11 @@ class TimelineCard extends HTMLElement {
             this._cache.set(key, {loading: false, tracks, error: null});
         } catch (err) {
             console.warn("Timeline card: history fetch failed", err);
-            this._cache.set(key, {loading: false, tracks: null, error: formatErrorMessage(err)});
+            this._cache.set(key, {
+                loading: false,
+                tracks: null,
+                error: formatErrorMessage(err),
+            });
         }
         this._render();
         requestAnimationFrame(() => this._drawMapPaths());
@@ -431,7 +444,14 @@ class TimelineCard extends HTMLElement {
         const tracks = Array.isArray(dayData?.tracks) ? dayData.tracks : [];
         const index = Math.min(this._activeEntityIndex, Math.max(0, tracks.length - 1));
         this._activeEntityIndex = index;
-        return tracks[index] || {segments: [], points: [], entityId: null, placeEntityId: null};
+        return (
+            tracks[index] || {
+                segments: [],
+                points: [],
+                entityId: null,
+                placeEntityId: null,
+            }
+        );
     }
 
     _setActiveEntityIndex(index) {
@@ -472,7 +492,7 @@ class TimelineCard extends HTMLElement {
         }
 
         return this._config.entity
-            .map((entityId, index) => {
+            .map(({entity: entityId}, index) => {
                 const state = this._hass?.states?.[entityId];
                 const lat = Number(state?.attributes?.latitude);
                 const lon = Number(state?.attributes?.longitude);
@@ -482,7 +502,7 @@ class TimelineCard extends HTMLElement {
                     point: [lat, lon],
                     picture: state?.attributes?.entity_picture || null,
                     name: state?.attributes?.friendly_name || entityId,
-                    color: getTrackColor(index, this._config?.colors),
+                    color: getTrackColor(index, this._config?.colors, this._config.entity[index]?.color),
                     isActive: index === this._activeEntityIndex,
                 };
             })
@@ -491,8 +511,17 @@ class TimelineCard extends HTMLElement {
 
     _setCurrentDayError(err) {
         const key = formatDate(this._selectedDate);
-        const current = this._cache.get(key) || {loading: false, segments: null, points: null, error: null};
-        this._cache.set(key, {...current, loading: false, error: formatErrorMessage(err)});
+        const current = this._cache.get(key) || {
+            loading: false,
+            segments: null,
+            points: null,
+            error: null,
+        };
+        this._cache.set(key, {
+            ...current,
+            loading: false,
+            error: formatErrorMessage(err),
+        });
     }
 
     // Event listeners

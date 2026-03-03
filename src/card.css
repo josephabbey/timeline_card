@@ -117,7 +117,9 @@ ha-card {
 .timeline-section {
   display: grid;
   grid-template-rows: 1fr;
-  transition: grid-template-rows 260ms ease, opacity 260ms ease;
+  transition:
+    grid-template-rows 260ms ease,
+    opacity 260ms ease;
   opacity: 1;
 }
 

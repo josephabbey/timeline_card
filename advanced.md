@@ -8,41 +8,47 @@ Each item in the `entity` list can be a plain string (entity ID) or an object. T
 
 ### Object properties
 
-| Property | Required | Description |
-|---|---|---|
-| `entity` | **Yes** | The `device_tracker` or `person` entity ID. |
-| `activity_entity` | No | A `sensor` entity that tracks the current activity (e.g. walking, running, cycling). When set, move segments display the resolved activity name instead of "Moving". |
-| `places_entity` | No | A `sensor` entity from the [Places integration](https://github.com/custom-components/places). Takes precedence over the top-level `places_entity` for this entity. |
+| Property          | Required | Description                                                                                                                                                          |
+| ----------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `entity`          | **Yes**  | The `device_tracker` or `person` entity ID.                                                                                                                          |
+| `activity_entity` | No       | A `sensor` entity that tracks the current activity (e.g. walking, running, cycling). When set, move segments display the resolved activity name instead of "Moving". |
+| `places_entity`   | No       | A `sensor` entity from the [Places integration](https://github.com/custom-components/places). Takes precedence over the top-level `places_entity` for this entity.   |
+| `color`           | No       | An override color code (like `#ff0000`, `red`, or `var(--orange-color)`) specifically for this entity. Overrides global map display `colors` array.                  |
 
 ### Examples
 
 **Simple — all entities as strings (works in GUI and YAML):**
+
 ```yaml
 type: custom:location-timeline-card
 entity:
-  - person.alice
-  - person.bob
+    - person.alice
+    - person.bob
 ```
 
 **Object form — per-entity activity and places sensors:**
+
 ```yaml
 type: custom:location-timeline-card
 entity:
-  - entity: person.alice
-    activity_entity: sensor.alice_activity
-    places_entity: sensor.places_alice
-  - entity: person.bob
-    activity_entity: sensor.bob_activity
-    places_entity: sensor.places_bob
+    - entity: person.alice
+      activity_entity: sensor.alice_activity
+      places_entity: sensor.places_alice
+      color: "#e91e63"
+    - entity: person.bob
+      activity_entity: sensor.bob_activity
+      places_entity: sensor.places_bob
+      color: "#2196f3"
 ```
 
 **Mixed — strings and objects together:**
+
 ```yaml
 type: custom:location-timeline-card
 entity:
-  - person.alice
-  - entity: person.bob
-    activity_entity: sensor.bob_activity
+    - person.alice
+    - entity: person.bob
+      activity_entity: sensor.bob_activity
 ```
 
 ### How `places_entity` resolution works
@@ -51,14 +57,15 @@ entity:
 2. **Top-level fallback** — If not specified per-entity, the card checks the top-level `places_entity` list and auto-matches by the `devicetracker_entityid` attribute on the Places sensor.
 
 This means you can mix both approaches:
+
 ```yaml
 type: custom:location-timeline-card
 entity:
-  - entity: person.alice
-    places_entity: sensor.places_alice
-  - person.bob
+    - entity: person.alice
+      places_entity: sensor.places_alice
+    - person.bob
 places_entity:
-  - sensor.places_bob
+    - sensor.places_bob
 ```
 
 ### GUI editor behavior

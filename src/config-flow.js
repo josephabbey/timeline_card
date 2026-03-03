@@ -4,7 +4,12 @@ export function getConfigFormSchema() {
             {
                 name: "entity",
                 required: true,
-                selector: {entity: {multiple: true, filter: [{domain: ["person", "device_tracker"]}]}},
+                selector: {
+                    entity: {
+                        multiple: true,
+                        filter: [{domain: ["person", "device_tracker"]}],
+                    },
+                },
             },
             {
                 type: "expandable",
@@ -14,7 +19,12 @@ export function getConfigFormSchema() {
                 schema: [
                     {
                         name: "places_entity",
-                        selector: {entity: {multiple: true, filter: [{domain: "sensor", integration: "places"}]}},
+                        selector: {
+                            entity: {
+                                multiple: true,
+                                filter: [{domain: "sensor", integration: "places"}],
+                            },
+                        },
                     },
                     {name: "osm_api_key", selector: {text: {type: "email"}}},
                 ],
@@ -30,8 +40,14 @@ export function getConfigFormSchema() {
                         name: "",
                         flatten: true,
                         schema: [
-                            {name: "stay_radius_m", selector: {number: {min: 1, step: 1, mode: "box"}}},
-                            {name: "min_stay_minutes", selector: {number: {min: 1, step: 1, mode: "box"}}},
+                            {
+                                name: "stay_radius_m",
+                                selector: {number: {min: 1, step: 1, mode: "box"}},
+                            },
+                            {
+                                name: "min_stay_minutes",
+                                selector: {number: {min: 1, step: 1, mode: "box"}},
+                            },
                         ],
                     },
                 ],
@@ -49,15 +65,25 @@ export function getConfigFormSchema() {
                         schema: [
                             {
                                 name: "distance_unit",
-                                selector: {select: {options: ["metric", "imperial"], mode: "dropdown"}},
+                                selector: {
+                                    select: {options: ["metric", "imperial"], mode: "dropdown"},
+                                },
                             },
                             {
                                 name: "map_appearance",
-                                selector: {select: {options: ["auto", "light", "dark"], mode: "dropdown"}},
+                                selector: {
+                                    select: {
+                                        options: ["auto", "light", "dark"],
+                                        mode: "dropdown",
+                                    },
+                                },
                             },
                         ],
                     },
-                    {name: "map_height_px", selector: {number: {unit_of_measurement: "px"}}},
+                    {
+                        name: "map_height_px",
+                        selector: {number: {unit_of_measurement: "px"}},
+                    },
                     {
                         type: "grid",
                         name: "",
@@ -69,6 +95,15 @@ export function getConfigFormSchema() {
                     },
                     {name: "collapse_timeline", selector: {boolean: {}}},
                     {name: "colors", selector: {text: {multiple: true}}},
+                    {
+                        name: "activity_icon_map",
+                        selector: {
+                            object: {
+                                keySchema: {selector: {text: {}}},
+                                valueSchema: {selector: {icon: {}}},
+                            },
+                        },
+                    },
                 ],
             },
         ],

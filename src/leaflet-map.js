@@ -57,7 +57,10 @@ export class TimelineLeafletMap {
             const segments = Array.isArray(track?.segments) ? track.segments : [];
             segments.forEach((segment) => {
                 if (segment?.type === "stay" && segment.center) {
-                    points.push({point: [segment.center.lat, segment.center.lon], timestamp: segment.start});
+                    points.push({
+                        point: [segment.center.lat, segment.center.lon],
+                        timestamp: segment.start,
+                    });
                 }
                 if (segment?.type === "move" && Array.isArray(segment.points)) {
                     points.push(...segment.points);
@@ -149,8 +152,9 @@ export class TimelineLeafletMap {
         const stayMarkers = Array.isArray(segments) ? segments.filter((segment) => segment?.type === "stay") : [];
 
         stayMarkers.forEach((stay) => {
+            const iconName = stay.zoneIcon || "mdi:map-marker";
             const icon = createMarkerIcon({
-                iconName: stay.zoneIcon || "mdi:map-marker",
+                iconName: iconName,
                 markerSize: 18,
                 iconSize: 14,
                 backgroundColor: this._activeTrackColor,
@@ -164,8 +168,9 @@ export class TimelineLeafletMap {
 
         if (!this._highlightedStay) return;
 
+        const iconName = this._highlightedStay.zoneIcon || "mdi:map-marker";
         const icon = createMarkerIcon({
-            iconName: this._highlightedStay.zoneIcon || "mdi:map-marker",
+            iconName: iconName,
             markerSize: 22,
             iconSize: 22,
             backgroundColor: "var(--accent-color)",
@@ -173,7 +178,12 @@ export class TimelineLeafletMap {
             leafletIconSize: [26, 26],
         });
 
-        this._mapLayers.push(this._Leaflet.marker(this._highlightedStay.center, {icon, zIndexOffset: 1000}));
+        this._mapLayers.push(
+            this._Leaflet.marker(this._highlightedStay.center, {
+                icon,
+                zIndexOffset: 1000,
+            }),
+        );
     }
 
     _drawMapLines() {
@@ -222,7 +232,12 @@ export class TimelineLeafletMap {
                 if (!location?.point) return;
                 const icon = createEntityIcon(location);
                 const zIndexOffset = location.isActive ? 1500 : 1000;
-                markerGroup.addLayer(this._Leaflet.marker(location.point, {icon, zIndexOffset: zIndexOffset}));
+                markerGroup.addLayer(
+                    this._Leaflet.marker(location.point, {
+                        icon,
+                        zIndexOffset: zIndexOffset,
+                    }),
+                );
             });
         }
         this._mapLayers.push(markerGroup);
@@ -244,7 +259,11 @@ function createMarkerIcon(options) {
         `height: ${options.markerSize}px; width: ${options.markerSize}px; background-color: ${options.backgroundColor}; border-radius: 50%; border: 2px solid ${options.borderColor}; display: flex;`,
     );
 
-    return Leaflet.divIcon({html: iconDiv, className: "my-leaflet-icon", iconSize: options.leafletIconSize});
+    return Leaflet.divIcon({
+        html: iconDiv,
+        className: "my-leaflet-icon",
+        iconSize: options.leafletIconSize,
+    });
 }
 
 function createEntityIcon(location) {
@@ -276,7 +295,11 @@ function createEntityIcon(location) {
         `height: 42px; width: 42px; border-radius: 50%; border: 3px solid color-mix(in srgb, black 30%, ${location.color}); overflow: hidden; background-color: ${location.color}`,
     );
 
-    return Leaflet.divIcon({html: iconDiv, className: "my-leaflet-icon", iconSize: [48, 48]});
+    return Leaflet.divIcon({
+        html: iconDiv,
+        className: "my-leaflet-icon",
+        iconSize: [48, 48],
+    });
 }
 
 function createDefaultCurrentLocationIcon() {
@@ -293,7 +316,11 @@ function createDefaultCurrentLocationIcon() {
         "height: 20px; width: 20px; display: flex; align-items: center; justify-content: center;",
     );
 
-    return Leaflet.divIcon({html: iconDiv, className: "my-leaflet-icon", iconSize: [20, 20]});
+    return Leaflet.divIcon({
+        html: iconDiv,
+        className: "my-leaflet-icon",
+        iconSize: [20, 20],
+    });
 }
 
 function normalizeLatLng(point) {
