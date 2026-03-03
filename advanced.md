@@ -68,6 +68,32 @@ places_entity:
     - sensor.places_bob
 ```
 
+## Activity Icons
+
+When an `activity_entity` is provided, the card displays the current activity for "move" segments. You can customize the icons used for these activities using the `activity_icon_map` option.
+
+### `activity_icon_map`
+
+This is an object where keys are activity names (as reported by your activity sensor) and values are MDI icons.
+
+| Property            | Type   | Description                                                                                               |
+| ------------------- | ------ | --------------------------------------------------------------------------------------------------------- |
+| `activity_icon_map` | object | A map of activity names to icon strings (e.g., `walking: mdi:walk`). Falls back to zone icons or default. |
+
+**Example:**
+
+```yaml
+type: custom:location-timeline-card
+entity:
+    - entity: person.alice
+      activity_entity: sensor.alice_activity
+activity_icon_map:
+    Walking: mdi:walk
+    Running: mdi:run
+    Cycling: mdi:bike
+    "In car": mdi:car
+```
+
 ### GUI editor behavior
 
-When entity objects are detected in the configuration, the GUI editor is automatically disabled and the card switches to YAML mode. To return to the GUI editor, convert all entity items back to plain strings and configure `places_entity` / `activity_entity` separately or remove them.
+When entity objects are detected in the configuration, the GUI editor is automatically disabled and the card switches to YAML mode. To return to the GUI editor, convert all entity items back to plain strings and configure `places_entity` separately or remove it.
