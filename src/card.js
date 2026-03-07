@@ -34,7 +34,7 @@ const DEFAULT_CONFIG = {
     collapse_timeline: false,
     debug: false,
     activity_icon_map: {},
-    update_interval: 0,
+    update_interval: 300,
 };
 
 class TimelineCard extends HTMLElement {
